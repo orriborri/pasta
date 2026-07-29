@@ -1,0 +1,15 @@
+[package]
+name = "kb-core"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde = { workspace = true }
+chrono = { workspace = true }
+anyhow = { workspace = true }
+dirs = { workspace = true }
+sha2 = { workspace = true }
+rusqlite = { workspace = true }
+
+[lints]
+workspace = true

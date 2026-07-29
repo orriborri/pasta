@@ -1,0 +1,23 @@
+[package]
+name = "kb-storage"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+kb-core = { path = "../kb-core" }
+anyhow = { workspace = true }
+arrow-array = { workspace = true }
+arrow-schema = { workspace = true }
+parquet = { workspace = true }
+lancedb = { workspace = true }
+lance-arrow = "7"
+tantivy = { workspace = true }
+reqwest = { workspace = true }
+futures = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+chrono = { workspace = true }
+dirs = { workspace = true }
+
+[lints]
+workspace = true

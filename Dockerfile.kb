@@ -1,0 +1,30 @@
+# Multi-stage build for kb-engine (kb CLI + kb-mcp)
+FROM rust:1.91-slim AS builder
+
+WORKDIR /app
+RUN apt-get update && apt-get install -y pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
+
+# Copy workspace
+COPY Cargo.toml Cargo.lock ./
+COPY crates/ crates/
+
+# Build release binaries
+RUN cargo build --release -p kb-cli -p kb-mcp && \
+    cp target/release/kb target/release/kb-mcp /usr/local/bin/
+
+# Runtime image
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /usr/local/bin/kb /usr/local/bin/kb
+COPY --from=builder /usr/local/bin/kb-mcp /usr/local/bin/kb-mcp
+
+# Data directory (mount EFS or volume here)
+ENV KB_DATA_DIR=/data
+RUN mkdir -p /data
+
+EXPOSE 3030
+
+# Default: run HTTP API server
+CMD ["kb", "serve", "--port", "3030"]

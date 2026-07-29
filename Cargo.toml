@@ -1,0 +1,49 @@
+[workspace]
+members = [
+    "crates/common",
+    "crates/backend",
+    "crates/tui",
+    "crates/search",
+    "crates/mcp",
+    "crates/kb-core",
+    "crates/kb-storage",
+    "crates/kb-pipeline",
+    "crates/kb-fetchers",
+    "crates/kb-sync",
+    "crates/kb-cli",
+    "crates/kb-mcp",
+]
+resolver = "2"
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", features = ["serde"] }
+tokio = { version = "1", features = ["full"] }
+anyhow = "1"
+dirs = "6"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+indicatif = "0.17"
+tree-sitter = "0.24"
+tree-sitter-typescript = "0.23"
+tree-sitter-rust = "0.23"
+tree-sitter-python = "0.23"
+streaming-iterator = "0.1"
+toml = "0.8"
+arrow-array = "58"
+arrow-schema = "58"
+parquet = { version = "58", features = ["arrow"] }
+lancedb = "0.30"
+reqwest = { version = "0.12", features = ["json"] }
+futures = "0.3"
+clap = { version = "4", features = ["derive"] }
+sha2 = "0.10"
+tantivy = "0.22"
+rusqlite = { version = "0.32", features = ["bundled"] }
+axum = "0.8"

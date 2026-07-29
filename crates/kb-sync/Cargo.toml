@@ -1,0 +1,18 @@
+[package]
+name = "kb-sync"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+kb-core = { path = "../kb-core" }
+kb-storage = { path = "../kb-storage" }
+kb-pipeline = { path = "../kb-pipeline" }
+kb-fetchers = { path = "../kb-fetchers" }
+pasta-common = { path = "../common" }
+anyhow = { workspace = true }
+tokio = { workspace = true }
+chrono = { workspace = true }
+tracing = { workspace = true }
+
+[lints]
+workspace = true

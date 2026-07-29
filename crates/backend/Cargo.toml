@@ -1,0 +1,25 @@
+[package]
+name = "pasta-backend"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "pasta-backend"
+path = "src/main.rs"
+
+[dependencies]
+pasta-common = { path = "../common" }
+kb-core = { path = "../kb-core" }
+kb-storage = { path = "../kb-storage" }
+kb-sync = { path = "../kb-sync" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+tokio = { workspace = true }
+anyhow = { workspace = true }
+dirs = { workspace = true }
+futures = "0.3"
+reqwest = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+libc = "0.2"

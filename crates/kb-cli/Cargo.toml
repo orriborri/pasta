@@ -1,0 +1,28 @@
+[package]
+name = "kb-cli"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "kb"
+path = "src/main.rs"
+
+[dependencies]
+kb-core = { path = "../kb-core" }
+kb-storage = { path = "../kb-storage" }
+kb-pipeline = { path = "../kb-pipeline" }
+kb-fetchers = { path = "../kb-fetchers" }
+kb-sync = { path = "../kb-sync" }
+pasta-common = { path = "../common" }
+anyhow = { workspace = true }
+tokio = { workspace = true }
+clap = { workspace = true }
+axum = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[lints]
+workspace = true

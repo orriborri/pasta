@@ -1,0 +1,13 @@
+/target
+
+# Runtime state and generated output
+/logs
+/.feeds
+*.log
+
+# Nix / direnv
+/.direnv
+/.envrc
+
+# Stray literal-tilde dir created when a `~` path isn't expanded
+/~

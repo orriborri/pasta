@@ -1,0 +1,335 @@
+use serde::Deserialize;
+use std::collections::HashMap;
+use std::fs;
+use std::path::PathBuf;
+use std::sync::OnceLock;
+
+static CONFIG: OnceLock<AppConfig> = OnceLock::new();
+
+pub fn get() -> &'static AppConfig {
+    CONFIG.get_or_init(|| {
+        let path = config_path();
+        if !path.exists() {
+            return AppConfig::default();
+        }
+        fs::read_to_string(&path)
+            .ok()
+            .and_then(|s| toml::from_str(&s).ok())
+            .unwrap_or_default()
+    })
+}
+
+/// Call once at startup to initialize config. Returns error message if parse failed (uses defaults).
+pub fn init() -> Option<String> {
+    let path = config_path();
+    if !path.exists() {
+        let default = generate_default_toml();
+        fs::create_dir_all(path.parent().unwrap()).ok();
+        fs::write(&path, &default).ok();
+        CONFIG.set(AppConfig::default()).ok();
+        return None;
+    }
+    match fs::read_to_string(&path) {
+        Ok(content) => match toml::from_str::<AppConfig>(&content) {
+            Ok(cfg) => { CONFIG.set(cfg).ok(); None }
+            Err(e) => {
+                let msg = format!("config parse error: {}", e);
+                CONFIG.set(AppConfig::default()).ok();
+                Some(msg)
+            }
+        }
+        Err(e) => {
+            let msg = format!("config read error: {}", e);
+            CONFIG.set(AppConfig::default()).ok();
+            Some(msg)
+        }
+    }
+}
+
+pub fn config_path() -> PathBuf {
+    dirs::home_dir().unwrap().join(".pasta/config.toml")
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct AppConfig {
+    pub general: GeneralConfig,
+    pub schedules: HashMap<String, NativeScheduleEntry>,
+    pub agents: Vec<AgentEntry>,
+    pub repos: Vec<RepoEntry>,
+    pub binaries: BinaryConfig,
+    pub gog: GogConfig,
+    pub kb: KbSection,
+    pub trello: TrelloConfig,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct GeneralConfig {
+    pub vault_path: String,
+    pub agent_timeout_minutes: u64,
+    pub log_level: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct NativeScheduleEntry {
+    pub interval_minutes: u64,
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct AgentEntry {
+    pub name: String,
+    pub prompt: String,
+    #[serde(default)]
+    pub interval_minutes: u64,
+    #[serde(default)]
+    pub cwd: Option<String>,
+    #[serde(default)]
+    pub depends_on: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct RepoEntry {
+    pub path: String,
+    pub include: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+#[derive(Default)]
+pub struct BinaryConfig {
+    pub glab: String,
+    pub slack_api: String,
+    pub linear_api: String,
+    pub kiro_cli: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct GogConfig {
+    pub account: String,
+    pub credentials_file: String,
+    pub keyring_backend: String,
+    pub keyring_password: String,
+    pub home: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct KbSection {
+    pub data_dir: String,
+    pub sync_on_fetch: bool,
+    pub sources: Vec<String>,
+    /// Email domains considered internal (auto-create People/ files for these).
+    pub internal_domains: Vec<String>,
+    /// Slack workspace members are considered internal if true.
+    pub internal_slack: bool,
+    /// Rules for auto-creating tasks from kb records.
+    pub task_rules: TaskRules,
+    /// When true, records matching an `auto_create` rule are written as
+    /// `status: pending` tasks that must be approved before they become active.
+    /// `ask` rules always produce pending tasks regardless of this flag.
+    pub require_task_approval: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
+pub struct TaskRules {
+    pub auto_create: Vec<TaskRule>,
+    pub ask: Vec<TaskRule>,
+    pub skip: Vec<TaskRule>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct TaskRule {
+    pub source: String,
+    pub signal: String,
+    #[serde(rename = "match")]
+    pub match_expr: String,
+}
+
+/// Trello board sync. Credentials come from here or, when empty, from the
+/// `TRELLO_API_KEY` / `TRELLO_TOKEN` / `TRELLO_BOARD_ID` environment variables —
+/// prefer the env vars, since `config.toml` is plaintext on disk.
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
+pub struct TrelloConfig {
+    pub enabled: bool,
+    pub api_key: String,
+    pub token: String,
+    /// Board id or shortLink (the segment after `/b/` in a board URL).
+    pub board_id: String,
+    /// Push the full task body into the card description. Off by default: task
+    /// bodies contain verbatim Slack/Gmail/GitLab content.
+    pub sync_description: bool,
+}
+
+// --- Defaults ---
+
+impl Default for AppConfig {
+    fn default() -> Self {
+        let mut schedules = HashMap::new();
+        for name in &["gitlab", "linear", "slack", "gmail", "calendar"] {
+            schedules.insert(name.to_string(), NativeScheduleEntry { interval_minutes: 60, enabled: true });
+        }
+        for name in &["vault-maintenance"] {
+            schedules.insert(name.to_string(), NativeScheduleEntry { interval_minutes: 1440, enabled: true });
+        }
+        schedules.insert("trello".to_string(), NativeScheduleEntry { interval_minutes: 10, enabled: true });
+        Self {
+            general: GeneralConfig::default(),
+            schedules,
+            agents: vec![],
+            repos: vec![],
+            binaries: BinaryConfig::default(),
+            gog: GogConfig::default(),
+            kb: KbSection::default(),
+            trello: TrelloConfig::default(),
+        }
+    }
+}
+
+impl Default for GeneralConfig {
+    fn default() -> Self {
+        Self {
+            vault_path: dirs::home_dir().unwrap().join("Obsidian/Readpeak").to_string_lossy().to_string(),
+            agent_timeout_minutes: 10,
+            log_level: "info".to_string(),
+        }
+    }
+}
+
+impl Default for NativeScheduleEntry {
+    fn default() -> Self {
+        Self { interval_minutes: 60, enabled: true }
+    }
+}
+
+
+impl Default for GogConfig {
+    fn default() -> Self {
+        Self {
+            account: String::new(),
+            credentials_file: String::new(),
+            keyring_backend: "file".to_string(),
+            keyring_password: "pasta-gog-keyring".to_string(),
+            home: dirs::home_dir().unwrap().join(".kiro/gog").to_string_lossy().to_string(),
+        }
+    }
+}
+
+impl Default for KbSection {
+    fn default() -> Self {
+        Self {
+            data_dir: dirs::home_dir().unwrap().join(".kb").to_string_lossy().to_string(),
+            sync_on_fetch: true,
+            sources: vec!["slack".into(), "gmail".into(), "linear".into(), "git".into(), "vault".into()],
+            internal_domains: vec!["@readpeak.com".into()],
+            internal_slack: true,
+            task_rules: TaskRules::default(),
+            require_task_approval: true,
+        }
+    }
+}
+
+fn generate_default_toml() -> String {
+    r#"# pasta configuration
+# Restart the daemon after making changes.
+
+[general]
+vault_path = "/home/orre/Obsidian/Readpeak"
+# Log level: trace, debug, info, warn, error (env RUST_LOG overrides)
+log_level = "info"
+
+# Native schedule intervals (minutes). Set enabled = false to disable.
+[schedules.gitlab]
+interval_minutes = 60
+enabled = true
+
+[schedules.linear]
+interval_minutes = 60
+enabled = true
+
+[schedules.slack]
+interval_minutes = 60
+enabled = true
+
+[schedules.gmail]
+interval_minutes = 60
+enabled = true
+
+[schedules.calendar]
+interval_minutes = 60
+enabled = true
+
+[schedules.vault-maintenance]
+interval_minutes = 1440
+enabled = true
+
+# Trello board sync (see [trello] below).
+[schedules.trello]
+interval_minutes = 10
+enabled = true
+
+# Agentic schedules. Use depends_on for chaining, or interval_minutes for periodic.
+[[agents]]
+name = "inbox-processor"
+prompt = "Process inbox and feeds into the vault."
+cwd = "/home/orre/Obsidian/Readpeak"
+depends_on = ["gitlab-fetcher", "gmail-fetcher", "slack-fetcher", "linear-fetcher"]
+
+[[agents]]
+name = "daily-writer"
+prompt = "Create or update today's daily note."
+cwd = "/home/orre/Obsidian/Readpeak"
+depends_on = ["inbox-processor"]
+
+# Repos to index. Treesitter extracts symbols (functions, classes, types) from
+# matching files — full file contents are not copied, only structural summaries.
+[[repos]]
+path = "/home/orre/ReadPeak/wiki"
+include = ["*.md"]
+
+[[repos]]
+path = "/home/orre/ReadPeak/eks-workloads"
+include = ["**/*.ts", "README.md"]
+
+[[repos]]
+path = "/home/orre/ReadPeak/cdk"
+include = ["**/*.ts", "README.md", "config/*.toml"]
+
+[[repos]]
+path = "/home/orre/ReadPeak/mononode"
+include = ["README.md", "docs/**", "apps/platform/graphql/src/**/*.ts"]
+
+# Binary paths. Empty = auto-detect from PATH.
+[binaries]
+glab = ""
+slack_api = ""
+linear_api = ""
+kiro_cli = ""
+
+[kb]
+# Tasks derived from kb records are written as `status: pending` and must be
+# approved in the TUI Tasks tab (a = approve, d = reject) before they go active.
+# Set to false to let [kb.task_rules.auto_create] matches create active tasks
+# directly. `ask` rules always require approval.
+require_task_approval = true
+
+# Two-way sync between Tasks/ and a Trello board. Pending tasks stay local —
+# only approved work reaches the board. Lists Today / This Week / Later /
+# Backlog / Done are created if missing and map to the Kanban column tags.
+# Cards you create on the board become task files.
+# Leave api_key/token empty and export TRELLO_API_KEY / TRELLO_TOKEN instead:
+# this file is plaintext. Get both from https://trello.com/power-ups/admin
+[trello]
+enabled = false
+api_key = ""
+token = ""
+board_id = ""
+# Push task bodies (verbatim Slack/Gmail/GitLab content) into card descriptions.
+sync_description = false
+"#.to_string()
+}
