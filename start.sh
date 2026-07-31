@@ -2,11 +2,17 @@
 set -e
 cd "$(dirname "$0")"
 
-# Build if needed
-if [ ! -f target/release/pasta ] || \
+# Build if needed. All three binaries are checked: the daemon shells out to `kb`
+# for inbox processing, so a missing kb-cli silently disables that path.
+if [ ! -f target/release/pasta ] || [ ! -f target/release/pasta-backend ] || \
+   [ ! -f target/release/kb ] || \
    [ "$(find crates -name '*.rs' -newer target/release/pasta 2>/dev/null | head -1)" ]; then
-    cargo build --release -p pasta-backend -p pasta-tui
+    cargo build --release -p pasta-backend -p pasta-tui -p kb-cli
 fi
+
+# Put our own binaries first on PATH so the daemon's `kb` subprocess resolves to
+# the build we just made, without installing anything outside the repo.
+export PATH="$PWD/target/release:$PATH"
 
 # Stop any backend from a previous run. Without this, an old process keeps
 # running stale code (e.g. after a rebuild) or two backends compete for the

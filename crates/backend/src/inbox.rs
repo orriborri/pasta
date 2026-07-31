@@ -6,8 +6,8 @@
 //! `kb.require_task_approval = false` lets `auto_create` matches go straight to
 //! `status: open`; `ask` matches always land in the pending queue.
 //!
-//! kb-engine is queried as a subprocess (`kb recent --json`), matching the
-//! "pasta is a thin orchestrator that calls kb-engine" design.
+//! kb-engine is queried as a subprocess (`kb recent`, which prints JSON),
+//! matching the "pasta is a thin orchestrator that calls kb-engine" design.
 
 use std::path::Path;
 
@@ -43,7 +43,7 @@ struct KbRecord {
 /// Returns an error if the `kb recent` subprocess cannot be spawned or fails.
 pub async fn process(days: i64) -> anyhow::Result<()> {
     let output = tokio::process::Command::new("kb")
-        .args(["recent", "--days", &days.to_string(), "--json"])
+        .args(["recent", "--days", &days.to_string()])
         .output()
         .await?;
 
