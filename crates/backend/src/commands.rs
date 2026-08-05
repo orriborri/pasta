@@ -68,8 +68,15 @@ pub async fn handle(cmd: Command, state: &AppState, tx: &EventTx) {
             let tx2 = tx.clone();
             log("kb-sync", "manual sync triggered");
             tokio::spawn(async move {
-                let _ = tokio::process::Command::new("kb").arg("sync").status().await;
-                let _ = tx2.send(Event::Flash { message: "kb sync complete".to_string() });
+                let sources = &["slack", "gmail", "linear", "git", "vault", "calendar", "gdocs"];
+                match kb_sync::run(sources).await {
+                    Ok(n) => {
+                        let _ = tx2.send(Event::Flash { message: format!("kb sync complete: {n} records") });
+                    }
+                    Err(e) => {
+                        let _ = tx2.send(Event::Flash { message: format!("kb sync failed: {e}") });
+                    }
+                }
             });
         }
         Command::Organize => {
