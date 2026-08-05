@@ -22,13 +22,23 @@ pub struct Task {
     pub priority: String,
     pub project: String,
     pub due: Option<String>,
-    pub file: String,
+    /// Path to the task file, relative to the vault root. Used to write
+    /// mutations back to the file the task was actually loaded from,
+    /// including tasks routed into `Tasks/<Initiative>/` subfolders.
+    pub path: std::path::PathBuf,
     pub id: String,
     pub blocked_by: Vec<String>,
     pub source_url: Option<String>,
 }
 
 impl Task {
+    /// The file name, without any parent directories. Used for display and
+    /// for matching, not for locating the file on disk.
+    #[must_use]
+    pub fn file_name(&self) -> String {
+        self.path.file_name().unwrap_or_default().to_string_lossy().to_string()
+    }
+
     /// True when this task still needs approval before it counts as active work.
     #[must_use]
     pub fn is_pending(&self) -> bool {
@@ -144,18 +154,14 @@ pub fn set_column_tag(content: &str, tag: &str) -> String {
 }
 
 pub fn load_tasks() -> Vec<Task> {
-    let dir = Path::new(vault_path()).join("Tasks");
-    let mut tasks = vec![];
-    let Ok(entries) = fs::read_dir(&dir) else { return tasks };
+    load_tasks_from(&Path::new(vault_path()).join("Tasks"))
+}
 
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().is_some_and(|e| e == "md") {
-            if let Some(t) = parse_task(&path) {
-                tasks.push(t);
-            }
-        }
-    }
+/// Load every task under `dir`, recursing into initiative subfolders so
+/// routed tasks are not silently hidden. Exposed separately from
+/// `load_tasks` so tests can point it at a scratch directory.
+fn load_tasks_from(dir: &Path) -> Vec<Task> {
+    let mut tasks: Vec<Task> = walk_md_files(dir).iter().filter_map(|p| parse_task(p)).collect();
     tasks.sort_by(|a, b| a.priority.cmp(&b.priority));
     tasks
 }
@@ -198,7 +204,7 @@ fn parse_task(path: &Path) -> Option<Task> {
             let d = get("due:");
             if d.is_empty() { None } else { Some(d) }
         },
-        file: path.file_name()?.to_string_lossy().to_string(),
+        path: path.to_path_buf(),
         id: get("id:"),
         blocked_by,
         source_url: {
@@ -257,8 +263,7 @@ pub fn today_daily_exists() -> bool {
 }
 
 pub fn update_task_priority(task: &Task, new_priority: &str) {
-    let path = Path::new(vault_path()).join("Tasks").join(&task.file);
-    let Ok(content) = fs::read_to_string(&path) else { return };
+    let Ok(content) = fs::read_to_string(&task.path) else { return };
     let updated = if content.contains("\npriority:") {
         content.lines().map(|l| {
             if l.starts_with("priority:") {
@@ -276,13 +281,12 @@ pub fn update_task_priority(task: &Task, new_priority: &str) {
             }
         }).collect::<Vec<_>>().join("\n")
     };
-    fs::write(path, updated).ok();
+    fs::write(&task.path, updated).ok();
 }
 
 /// Rewrite the `status:` frontmatter line of a task file in place.
 fn rewrite_status(task: &Task, new_status: &str) {
-    let path = Path::new(vault_path()).join("Tasks").join(&task.file);
-    let Ok(content) = fs::read_to_string(&path) else { return };
+    let Ok(content) = fs::read_to_string(&task.path) else { return };
     let updated = content.lines().map(|l| {
         if l.starts_with("status:") {
             format!("status: {}", new_status)
@@ -290,7 +294,7 @@ fn rewrite_status(task: &Task, new_status: &str) {
             l.to_string()
         }
     }).collect::<Vec<_>>().join("\n");
-    fs::write(path, updated).ok();
+    fs::write(&task.path, updated).ok();
 }
 
 pub fn close_task(task: &Task) {
@@ -317,6 +321,90 @@ pub fn add_to_inbox(text: &str) {
     let mut content = fs::read_to_string(&path).unwrap_or_default();
     content.push_str(&format!("\n- [ ] {}", text));
     fs::write(path, content).ok();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A scratch directory under the OS temp dir, removed on drop.
+    struct ScratchDir(std::path::PathBuf);
+
+    impl ScratchDir {
+        fn new(name: &str) -> Self {
+            let dir = std::env::temp_dir().join(format!("pasta-vault-test-{name}-{}", std::process::id()));
+            let _ = fs::remove_dir_all(&dir);
+            fs::create_dir_all(&dir).unwrap();
+            Self(dir)
+        }
+
+        fn path(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for ScratchDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    const TASK_MD: &str = "---\ntitle: Subfolder task\nstatus: open\npriority: today\nid: t-1\n---\nBody\n";
+
+    #[test]
+    fn load_tasks_finds_files_in_initiative_subfolders() {
+        let scratch = ScratchDir::new("load");
+        let tasks_dir = scratch.path().join("Tasks");
+        let sub_dir = tasks_dir.join("Some Initiative");
+        fs::create_dir_all(&sub_dir).unwrap();
+        fs::write(sub_dir.join("routed-task.md"), TASK_MD).unwrap();
+        fs::write(tasks_dir.join("top-level-task.md"), TASK_MD).unwrap();
+
+        let tasks = load_tasks_from(&tasks_dir);
+
+        assert_eq!(tasks.len(), 2, "both the top-level and the routed task must appear");
+        assert!(tasks.iter().any(|t| t.path == sub_dir.join("routed-task.md")));
+        assert!(tasks.iter().any(|t| t.path == tasks_dir.join("top-level-task.md")));
+    }
+
+    #[test]
+    fn close_task_writes_to_the_subfolder_path_it_was_loaded_from() {
+        let scratch = ScratchDir::new("close");
+        let sub_dir = scratch.path().join("Tasks").join("Some Initiative");
+        fs::create_dir_all(&sub_dir).unwrap();
+        let task_path = sub_dir.join("routed-task.md");
+        fs::write(&task_path, TASK_MD).unwrap();
+
+        let task = parse_task(&task_path).expect("task should parse");
+        assert_eq!(task.path, task_path);
+
+        close_task(&task);
+
+        let updated = fs::read_to_string(&task_path).unwrap();
+        assert!(updated.contains("status: done"), "status must be updated at the real path: {updated}");
+        // No file should have been created anywhere else, e.g. at the top
+        // level of the task directory.
+        assert!(!scratch.path().join("Tasks").join("routed-task.md").exists());
+    }
+
+    #[test]
+    fn approve_task_writes_to_the_subfolder_path_it_was_loaded_from() {
+        let scratch = ScratchDir::new("approve");
+        let sub_dir = scratch.path().join("Tasks").join("Some Initiative");
+        fs::create_dir_all(&sub_dir).unwrap();
+        let task_path = sub_dir.join("routed-task.md");
+        let pending_md = TASK_MD.replace("status: open", "status: pending");
+        fs::write(&task_path, &pending_md).unwrap();
+
+        let task = parse_task(&task_path).expect("pending task should still parse");
+        assert!(task.is_pending());
+        assert_eq!(task.path, task_path);
+
+        approve_task(&task);
+
+        let updated = fs::read_to_string(&task_path).unwrap();
+        assert!(updated.contains("status: open"), "approval must land at the real path: {updated}");
+    }
 }
 
 // --- Frontmatter helpers (continued) ---
@@ -525,7 +613,7 @@ pub fn suggest_columns(tasks: &[Task], patterns: &[TriagePattern]) -> Vec<(Strin
         let suggestion = patterns.iter()
             .filter(|p| p.hits >= 3 && (p.misses as f32 / (p.hits + p.misses) as f32) < 0.3)
             .find(|p| {
-                let source_match = task.file.to_lowercase().contains(&p.source) ||
+                let source_match = task.file_name().to_lowercase().contains(&p.source) ||
                     task.title.to_lowercase().contains(&p.source);
                 let keyword_match = p.keywords.iter().any(|kw| title_words.contains(&kw.to_lowercase()));
                 source_match && keyword_match
