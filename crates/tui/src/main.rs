@@ -346,8 +346,8 @@ async fn handle_normal_key(
         }
         KeyCode::Char('e') | KeyCode::Enter if app.tab == Tab::Tasks => {
             if let Some(task) = app.selected_task() {
-                let file = task.file.clone();
-                open_in_editor(&file, terminal);
+                let path = task.path.clone();
+                open_in_editor(&path, terminal);
                 app.tasks = vault::load_tasks();
             }
         }
@@ -489,12 +489,11 @@ fn toggle_daily_task(app: &mut App, task_idx: usize) {
     app.daily_note = content;
 }
 
-fn open_in_editor(file: &str, terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>) {
+fn open_in_editor(path: &std::path::Path, terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>) {
     let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vim".to_string());
-    let path = std::path::Path::new(vault::vault_path()).join("Tasks").join(file);
     disable_raw_mode().ok();
     stdout().execute(LeaveAlternateScreen).ok();
-    StdCommand::new(&editor).arg(&path).status().ok();
+    StdCommand::new(&editor).arg(path).status().ok();
     stdout().execute(EnterAlternateScreen).ok();
     enable_raw_mode().ok();
     terminal.clear().ok();
