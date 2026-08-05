@@ -6,59 +6,43 @@
 //! `kb.require_task_approval = false` lets `auto_create` matches go straight to
 //! `status: open`; `ask` matches always land in the pending queue.
 //!
-//! kb-engine is queried as a subprocess (`kb recent`, which prints JSON),
-//! matching the "pasta is a thin orchestrator that calls kb-engine" design.
+//! Records are read directly from the kb-engine Parquet store, with date filtering
+//! applied in-process.
 
 use std::path::Path;
 
+use chrono::Duration;
+use kb_core::{KbConfig, Record};
+use kb_storage::ParquetStore;
 use pasta_common::config;
 use pasta_common::task_match::{classify, Action, MatchAttrs};
 use pasta_common::vault::{STATUS_OPEN, STATUS_PENDING};
-use serde::Deserialize;
 
 use crate::util::log;
-
-/// Subset of a kb-engine `Record` needed for rule matching and task creation.
-#[derive(Deserialize, Default)]
-struct KbRecord {
-    id: String,
-    source: String,
-    kind: String,
-    title: String,
-    #[serde(default)]
-    content: String,
-    #[serde(default)]
-    author: String,
-    #[serde(default)]
-    participants: Vec<String>,
-    #[serde(default)]
-    url: String,
-    #[serde(default)]
-    tags: Vec<String>,
-}
 
 /// Query kb-engine for records from the last `days` and apply `task_rules`.
 ///
 /// # Errors
-/// Returns an error if the `kb recent` subprocess cannot be spawned or fails.
+/// Returns an error if reading from Parquet store fails.
 pub async fn process(days: i64) -> anyhow::Result<()> {
-    let output = tokio::process::Command::new("kb")
-        .args(["recent", "--days", &days.to_string()])
-        .output()
-        .await?;
+    let config = KbConfig::default();
+    let store = ParquetStore::new(&config);
+    let all_records = store.read_all()?;
 
-    if !output.status.success() {
-        anyhow::bail!("kb recent failed: {}", String::from_utf8_lossy(&output.stderr));
-    }
+    // Filter to records within the specified days
+    let cutoff = chrono::Utc::now() - Duration::days(days);
+    let records: Vec<Record> = all_records
+        .into_iter()
+        .filter(|r| r.created_at > cutoff)
+        .collect();
 
-    let records: Vec<KbRecord> = serde_json::from_slice(&output.stdout).unwrap_or_default();
     let kb = &config::get().kb;
     let rules = &kb.task_rules;
 
     let (mut created, mut proposed, mut skipped) = (0u32, 0u32, 0u32);
     for r in &records {
         let attrs = build_attrs(r);
-        let (action, signal) = classify(rules, &r.source, &attrs);
+        let (action, signal) = classify(rules, &r.source.to_string(), &attrs);
         // Approval mode downgrades auto-creation to a pending proposal; `ask`
         // matches are always proposals.
         let status = match action {
@@ -86,21 +70,36 @@ pub async fn process(days: i64) -> anyhow::Result<()> {
 
 /// Build matchable attributes from a record. Field names mirror the `field:value`
 /// tokens used in `task_rules` match expressions.
-fn build_attrs(r: &KbRecord) -> MatchAttrs {
+fn build_attrs(r: &Record) -> MatchAttrs {
+    let source_str = r.source.to_string();
+    let kind_str = kind_to_string(&r.kind);
     MatchAttrs::new()
-        .with("source", &r.source)
-        .with("kind", &r.kind)
-        .with("is", &r.kind)
+        .with("source", &source_str)
+        .with("kind", &kind_str)
+        .with("is", &kind_str)
         .with("author", &r.author)
         .with_many("label", &r.tags)
         .with_many("labels", &r.tags)
         .with_many("participants", &r.participants)
 }
 
+/// Convert Kind enum to string for matching
+fn kind_to_string(kind: &kb_core::Kind) -> String {
+    match kind {
+        kb_core::Kind::Message => "message",
+        kb_core::Kind::Thread => "thread",
+        kb_core::Kind::Issue => "issue",
+        kb_core::Kind::Commit => "commit",
+        kb_core::Kind::Doc => "doc",
+        kb_core::Kind::Event => "event",
+    }
+    .to_string()
+}
+
 /// Write a task file with the given status. Deterministic filename derived from
 /// the kb id makes this idempotent across re-runs — including for tasks the user
 /// rejected, which keep their file so they are not proposed again.
-fn create_task(r: &KbRecord, signal: Option<&str>, status: &str) -> bool {
+fn create_task(r: &Record, signal: Option<&str>, status: &str) -> bool {
     let vault = pasta_common::vault::vault_path();
     let path = Path::new(vault).join("Tasks").join(format!("kb-{}.md", slugify(&r.id)));
     if path.exists() {
