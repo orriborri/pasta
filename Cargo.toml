@@ -15,6 +15,16 @@ members = [
 ]
 resolver = "2"
 
+# Dev-profile build-speed tuning. Full DWARF debuginfo made pasta-backend a
+# ~1.4GB debug binary, and linking that dominated every Ralph build/test phase.
+# line-tables-only keeps usable backtraces; dependencies need no debuginfo at all.
+# Changing these invalidates the shared dep cache once, then every build is faster.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
 [workspace.lints.clippy]
 pedantic = { level = "warn", priority = -1 }
 nursery = { level = "warn", priority = -1 }
