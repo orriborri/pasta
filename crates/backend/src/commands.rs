@@ -48,8 +48,22 @@ pub async fn handle(cmd: Command, state: &AppState, tx: &EventTx) {
             }
         }
         Command::ForceFetch => {
-            log("native-fetchers", "force fetch triggered");
             let st = state.clone();
+            let tx_clone = tx.clone();
+            let should_run = {
+                let mut sched = st.scheduler.lock().await;
+                if sched.running_native.contains("fetch-cycle") {
+                    let _ = tx_clone.send(Event::Flash { message: "fetch-cycle already running".to_string() });
+                    false
+                } else {
+                    sched.running_native.insert("fetch-cycle".to_string());
+                    true
+                }
+            };
+            if !should_run {
+                return;
+            }
+            log("native-fetchers", "force fetch triggered");
             tokio::spawn(async move {
                 let completed = {
                     let ps = st.process.lock().await;
@@ -60,8 +74,14 @@ pub async fn handle(cmd: Command, state: &AppState, tx: &EventTx) {
                     conn.event_tx.clone()
                 };
                 let new_completed = fetch_cycle::run(completed, event_tx).await;
-                let mut ps = st.process.lock().await;
-                ps.completed = new_completed;
+                {
+                    let mut ps = st.process.lock().await;
+                    ps.completed = new_completed;
+                }
+                {
+                    let mut sched = st.scheduler.lock().await;
+                    sched.running_native.remove("fetch-cycle");
+                }
             });
         }
         Command::Backfill => {
