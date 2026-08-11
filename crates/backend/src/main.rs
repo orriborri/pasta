@@ -1,4 +1,3 @@
-mod acp;
 mod cli;
 mod commands;
 mod fetch_cycle;

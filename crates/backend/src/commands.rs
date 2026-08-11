@@ -1,6 +1,6 @@
-use pasta_common::ipc::{ChatEventType, Command, Event};
+use pasta_common::ipc::{Command, Event};
 
-use crate::{acp, fetch_cycle, server};
+use crate::{fetch_cycle, server};
 use crate::process::spawn_agent;
 use crate::state::{AppState, EventTx};
 use crate::util::log;
@@ -106,30 +106,6 @@ pub async fn handle(cmd: Command, state: &AppState, tx: &EventTx) {
                 let _ = crate::vault_organize::audit_para().await;
                 let _ = tx2.send(Event::Flash { message: "Vault organize complete".to_string() });
             });
-        }
-        Command::ChatStart { agent } => {
-            let mut conn = state.connection.lock().await;
-            if let Some(mut handle) = conn.acp.take() {
-                let _ = handle.child.start_kill();
-            }
-            match acp::spawn(&agent, tx.clone()).await {
-                Ok(handle) => { conn.acp = Some(handle); }
-                Err(e) => {
-                    let _ = tx.send(Event::Chat { chat_type: ChatEventType::Error { message: e.to_string() } });
-                }
-            }
-        }
-        Command::ChatPrompt { text } => {
-            let mut conn = state.connection.lock().await;
-            if let Some(handle) = conn.acp.as_mut() {
-                let _ = acp::send_prompt(handle, &text).await;
-            }
-        }
-        Command::ChatStop => {
-            let mut conn = state.connection.lock().await;
-            if let Some(mut handle) = conn.acp.take() {
-                let _ = handle.child.start_kill();
-            }
         }
         Command::Search { query, source, participant, after, limit } => {
             let tx2 = tx.clone();

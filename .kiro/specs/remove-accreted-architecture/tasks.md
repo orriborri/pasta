@@ -128,9 +128,9 @@
   - Grep to confirm the vault literals appear only in `VaultLayout`
   - _Requirements: 6.2, 6.5, 6.6_
 
-- [ ] 16. Cover the pure parsers left untested
-  - Tests for `extract_work_item_key`, `extract_mr_from_name`, `parse_mr_url`
-  - Tests for `acp::parse_notification` covering both `session/update` and legacy `session/notification` formats
+- [x] 16. Cover the pure parsers left untested
+  - `extract_work_item_key`, `extract_mr_from_name`, `parse_mr_url` — covered (drift added tests in `vault_manager.rs`; verified present and passing)
+  - ~~Tests for `acp::parse_notification`~~ — MOOT: `acp.rs` was **deleted**. Its only client/consumer was the removed TUI, so the whole interactive-chat surface was removed rather than tested: `acp.rs`, `Command::{ChatStart,ChatPrompt,ChatStop}`, `Event::Chat`, `ChatEventType`, `ConnectionState.acp`. (Belongs to the `remove-embedded-agent-layer` spec, whose "preserve TUI chat" premise is void post-TUI-removal.)
   - _Requirements: 8.3, 8.4_
 
 - [ ] 17. Add the CI gate

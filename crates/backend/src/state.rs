@@ -24,7 +24,6 @@ pub struct ProcessState {
 
 pub struct ConnectionState {
     pub event_tx: Option<EventTx>,
-    pub acp: Option<crate::acp::AcpHandle>,
 }
 
 pub struct SchedulerState {
@@ -47,7 +46,6 @@ impl AppState {
             })),
             connection: Arc::new(Mutex::new(ConnectionState {
                 event_tx: None,
-                acp: None,
             })),
             scheduler: Arc::new(Mutex::new(SchedulerState {
                 last_run: HashMap::new(),

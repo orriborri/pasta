@@ -25,9 +25,6 @@ pub enum Command {
     ForceFetch,
     Backfill,
     Organize,
-    ChatStart { agent: String },
-    ChatPrompt { text: String },
-    ChatStop,
     /// Request full state
     Sync,
     /// Search the history index
@@ -49,7 +46,6 @@ pub enum Event {
     AgentStarted { index: usize, agent: String },
     AgentFinished { index: usize, agent: String },
     FetchComplete,
-    Chat { chat_type: ChatEventType },
     Flash { message: String },
     SearchResults { results: Vec<SearchResultItem> },
 }
@@ -61,13 +57,4 @@ pub struct SearchResultItem {
     pub participants: String,
     pub date: String,
     pub content: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum ChatEventType {
-    Text { text: String },
-    ToolCall { name: String, status: String },
-    TurnEnd,
-    Error { message: String },
 }
