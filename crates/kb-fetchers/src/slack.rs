@@ -28,7 +28,7 @@ impl SlackFetcher {
     }
 
     #[must_use]
-    pub fn with_lookback_days(mut self, days: i64) -> Self {
+    pub const fn with_lookback_days(mut self, days: i64) -> Self {
         self.lookback_days = days;
         self
     }

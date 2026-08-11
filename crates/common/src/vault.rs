@@ -119,10 +119,24 @@ impl VaultLayout {
         self.base.join("People")
     }
 
-    /// Path to the roadmap directory (0. Inbox/roadmap/)
+    /// Path to the roadmap directory (top-level `Roadmap/`). Initiative source
+    /// files live here; `route_tasks` reads them to seed `Tasks/`.
     #[must_use]
     pub fn roadmap(&self) -> std::path::PathBuf {
-        self.inbox().join("roadmap")
+        self.base.join("Roadmap")
+    }
+
+    /// Path to the `Waiting For.md` GTD file at the vault root.
+    #[must_use]
+    pub fn waiting(&self) -> std::path::PathBuf {
+        self.base.join("Waiting For.md")
+    }
+
+    /// Path to the stale-task archive (`4. Archive/Tasks-Stale/`), where the
+    /// vault manager moves stale and duplicate tasks.
+    #[must_use]
+    pub fn stale_archive(&self) -> std::path::PathBuf {
+        self.archive().join("Tasks-Stale")
     }
 
     /// Path to weekly meetings directory (0. Inbox/Weekly Meetings/)
@@ -361,8 +375,8 @@ fn parse_task(path: &Path) -> Option<Task> {
 }
 
 pub fn load_waiting() -> Vec<WaitingItem> {
-    let vault_path = Path::new(vault_path());
-    let path = vault_path.join("Waiting For.md");
+    let layout = VaultLayout::new(Path::new(vault_path()));
+    let path = layout.waiting();
     let Ok(content) = fs::read_to_string(&path) else { return vec![] };
 
     content

@@ -3,6 +3,7 @@ use chrono::Local;
 use kb_core::{Record, Source, SyncState};
 use kb_storage::{embedder, ParquetStore, TextIndex, VectorStore};
 use pasta_common::vault::VaultLayout;
+use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 use tracing::info;
@@ -10,7 +11,7 @@ use tracing::info;
 /// Sources that can be synced.
 pub const ALL_SOURCES: &[&str] = &["slack", "gmail", "linear", "git", "vault", "calendar", "gdocs"];
 
-/// Returns the feeds directory path using VaultLayout.
+/// Returns the feeds directory path using `VaultLayout`.
 /// This ensures the feeds directory is always relative to the configured vault path.
 #[must_use]
 pub fn feeds_dir() -> PathBuf {
@@ -193,10 +194,10 @@ fn format_slack_feed(records: &[&Record]) -> String {
             if !seen_threads.insert(&r.thread_id) { continue; }
             let thread_msgs: Vec<&&&Record> = dms.iter().filter(|m| m.thread_id == r.thread_id).collect();
             let person = r.title.split(" - ").nth(1).unwrap_or(&r.author);
-            body.push_str(&format!("**{}**\n", person));
+            let _ = writeln!(body, "**{person}**");
             for m in thread_msgs.iter().rev().take(3) {
                 let text: String = m.content.chars().take(100).collect();
-                body.push_str(&format!("  - {}: {}\n", m.author, text));
+                let _ = writeln!(body, "  - {}: {}", m.author, text);
             }
             body.push('\n');
         }
@@ -211,10 +212,10 @@ fn format_slack_feed(records: &[&Record]) -> String {
             if !seen_threads.insert(&r.thread_id) { continue; }
             let thread_msgs: Vec<&&&Record> = channels.iter().filter(|m| m.thread_id == r.thread_id).collect();
             let ch_name = r.title.split(" - ").next().unwrap_or("?").trim_start_matches('#');
-            body.push_str(&format!("**#{}** ({} messages)\n", ch_name, thread_msgs.len()));
+            let _ = writeln!(body, "**#{}** ({} messages)", ch_name, thread_msgs.len());
             for m in thread_msgs.iter().rev().take(5) {
                 let text: String = m.content.chars().take(100).collect();
-                body.push_str(&format!("  - {}: {}\n", m.author, text));
+                let _ = writeln!(body, "  - {}: {}", m.author, text);
             }
             body.push('\n');
         }
@@ -235,19 +236,19 @@ fn format_gmail_feed(records: &[&Record]) -> String {
         body.push_str("No actionable unread emails.\n");
     }
     for r in &actionable {
-        body.push_str(&format!("- **{}** — {} ({})\n", r.author, r.title, r.created_at.format("%b %d")));
+        let _ = writeln!(body, "- **{}** — {} ({})", r.author, r.title, r.created_at.format("%b %d"));
     }
 
     let gitlab: Vec<&&Record> = records.iter()
         .filter(|r| r.tags.contains(&"Gitlab".to_string()))
         .collect();
     if !gitlab.is_empty() {
-        body.push_str(&format!("\n## GitLab Notifications ({})\n\n", gitlab.len()));
+        let _ = write!(body, "\n## GitLab Notifications ({})\n\n", gitlab.len());
         for r in gitlab.iter().take(5) {
-            body.push_str(&format!("- {} ({})\n", r.title, r.created_at.format("%b %d")));
+            let _ = writeln!(body, "- {} ({})", r.title, r.created_at.format("%b %d"));
         }
         if gitlab.len() > 5 {
-            body.push_str(&format!("- ...and {} more\n", gitlab.len() - 5));
+            let _ = writeln!(body, "- ...and {} more", gitlab.len() - 5);
         }
     }
     body
@@ -265,7 +266,7 @@ fn format_linear_feed(records: &[&Record]) -> String {
             let status = r.tags.first().map_or("-", String::as_str);
             let project = r.tags.get(1).map_or("-", String::as_str);
             let link = if r.url.is_empty() { r.title.clone() } else { format!("[{}]({})", r.title, r.url) };
-            body.push_str(&format!("| {} | {} | {} |\n", link, status, project));
+            let _ = writeln!(body, "| {link} | {status} | {project} |");
         }
     }
     body
@@ -300,10 +301,10 @@ fn format_calendar_feed(records: &[&Record]) -> String {
     } else {
         for r in &today_events {
             let local_time = Local.from_utc_datetime(&r.created_at.naive_utc()).format("%H:%M");
-            body.push_str(&format!("- **{}** — {}\n", r.title, local_time));
+            let _ = writeln!(body, "- **{}** — {}", r.title, local_time);
             if !r.content.is_empty() && r.content != r.title {
                 let preview: String = r.content.chars().take(80).collect();
-                body.push_str(&format!("  {}\n", preview));
+                let _ = writeln!(body, "  {preview}");
             }
         }
     }
@@ -314,7 +315,7 @@ fn format_calendar_feed(records: &[&Record]) -> String {
     } else {
         for r in upcoming_events.iter().take(15) {
             let local_dt = Local.from_utc_datetime(&r.created_at.naive_utc());
-            body.push_str(&format!("- **{}** — {}\n", r.title, local_dt.format("%a %b %d %H:%M")));
+            let _ = writeln!(body, "- **{}** — {}", r.title, local_dt.format("%a %b %d %H:%M"));
         }
     }
     body
@@ -344,7 +345,7 @@ async fn embed_and_upsert(vector: &VectorStore, records: &[Record]) -> Result<()
 mod tests {
     use super::*;
 
-    /// Test that kb-sync's write_feeds uses VaultLayout instead of hardcoded path
+    /// Test that kb-sync's `write_feeds` uses `VaultLayout` instead of hardcoded path
     #[test]
     fn write_feeds_uses_vault_layout_for_feeds_dir() {
         // This test verifies that write_feeds uses VaultLayout::feeds() instead
@@ -378,7 +379,7 @@ mod tests {
         assert_eq!(feeds_path, vault_path.join(".feeds"));
     }
 
-    /// Test that feeds_dir returns a vault-relative path
+    /// Test that `feeds_dir` returns a vault-relative path
     #[test]
     fn feeds_dir_is_vault_relative() {
         // This test verifies that feeds_dir() returns a path relative to

@@ -187,10 +187,11 @@ pub struct TrelloConfig {
 impl Default for AppConfig {
     fn default() -> Self {
         let mut schedules = HashMap::new();
-        for name in &["gitlab", "linear", "slack", "gmail", "calendar"] {
+        for name in &crate::data::FETCH_GROUP_NAMES {
             schedules.insert(name.to_string(), NativeScheduleEntry { interval_minutes: 60, enabled: true });
         }
-        for name in &["vault-maintenance"] {
+        {
+            let name = &"vault-maintenance";
             schedules.insert(name.to_string(), NativeScheduleEntry { interval_minutes: 1440, enabled: true });
         }
         schedules.insert("trello".to_string(), NativeScheduleEntry { interval_minutes: 10, enabled: true });

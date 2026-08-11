@@ -67,13 +67,12 @@ pub async fn build_state_snapshot(state: &AppState) -> Event {
 
     let sched = state.scheduler.lock().await;
     let config = &pasta_common::config::get().schedules;
-    const FETCH_GROUP_NAMES: &[&str] = &["gitlab", "linear", "slack", "gmail", "calendar"];
     let native_schedules: Vec<ipc::NativeSchedule> = pasta_common::data::KNOWN_NATIVE_SCHEDULES.iter().map(|&name| {
         let interval = config.get(name).map_or(60, |e| e.interval_minutes);
         let last_run = sched.last_run.get(name)
-            .or_else(|| if FETCH_GROUP_NAMES.contains(&name) { sched.last_run.get("fetch-cycle") } else { None })
+            .or_else(|| if pasta_common::data::FETCH_GROUP_NAMES.contains(&name) { sched.last_run.get("fetch-cycle") } else { None })
             .copied();
-        let running = sched.running_native.contains(name) || (FETCH_GROUP_NAMES.contains(&name) && sched.running_native.contains("fetch-cycle"));
+        let running = sched.running_native.contains(name) || (pasta_common::data::FETCH_GROUP_NAMES.contains(&name) && sched.running_native.contains("fetch-cycle"));
         ipc::NativeSchedule { name: name.to_string(), interval_minutes: interval, last_run, running }
     }).collect();
     let agents_config = &pasta_common::config::get().agents;

@@ -112,6 +112,9 @@ impl TextIndex {
     ///
     /// # Errors
     /// Returns error if the query cannot be parsed or the search fails.
+    ///
+    /// # Panics
+    /// Panics only if the hardcoded fallback query `"_"` fails to parse, which cannot happen.
     pub fn search(&self, query_str: &str, limit: usize) -> Result<Vec<TextResult>> {
         let query_str = query_str.trim();
         if query_str.is_empty() {

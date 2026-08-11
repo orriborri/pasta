@@ -108,14 +108,18 @@
   - Assert a missing directory produces a warning rather than a silent empty result — DONE: `warn_if_missing` now returns whether it emitted a (deduplicated) warning; the two former `panic!("TODO")` stubs are real tests (missing→warns, repeat→suppressed). No stderr capture needed; `cargo test --workspace` passes.
   - _Requirements: 6.1, 6.3_
 
-- [ ] 13. Replace path literals in common and backend
-  - `crates/common/src/vault.rs` and `crates/backend/src/fetchers/vault_manager.rs` (~14 sites)
-  - `crates/backend/src/vault_organize.rs`, `cli.rs`, `inbox.rs`, `trello/mod.rs`
+- [x] 13. Replace path literals in common and backend
+  - `vault_manager.rs` already routed through `VaultLayout` (drift). Remaining literals lifted into new accessors: `VaultLayout::waiting()` (`Waiting For.md`), `stale_archive()` (`4. Archive/Tasks-Stale`), and fixed the dead+wrong `roadmap()` (was `0. Inbox/roadmap`; now top-level `Roadmap/`, the real dir and cli.rs's actual target — it had no other callers)
+  - Consumers updated: `vault.rs::load_waiting`→`waiting()`; `vault_manager.rs` ×2 `Tasks-Stale`→`stale_archive()`; `cli.rs::route_tasks`→`roadmap()`; `trello::linked_card_ids` `["Tasks","Archive"]`→`[tasks(), archive()]` — the latter also fixes a latent bug (it scanned a non-existent top-level `Archive/` rather than `4. Archive/`, so archived tasks were never excluded from Trello re-adoption)
+  - `vault_organize.rs` already uses `projects()/areas()`; `inbox.rs` uses `tasks()/inbox()`; the `"Tasks"` in `vault_organize` is a category label, not a path
+  - FLAG (semantic, not a literal — out of scope): `weekly_meetings()` = `0. Inbox/Weekly Meetings` but a top-level `Meetings/` dir exists; same class as the roadmap bug, left for a decision
   - _Requirements: 6.1, 6.2_
 
-- [ ] 14. Replace path literals in kb crates
+- [x] 14. Replace path literals in kb crates
   - ~~`crates/tui` daily note, timetracking, and agents directories~~ — moot (crate deleted)
-  - `kb-sync`'s hardcoded absolute `FEEDS_DIR`, and `kb-fetchers/vault.rs` PARA literals — REAL, pending
+  - `kb-sync`'s `FEEDS_DIR`: already done by the drift — `feeds_dir()` uses `VaultLayout::new(vault_path).feeds()` (covered by `write_feeds_uses_vault_layout_for_feeds_dir`)
+  - `kb-fetchers/src/vault.rs` PARA literals: DONE — `VaultFetcher::fetch` now builds a `VaultLayout` and routes Tasks/People/Projects/Areas/Resources through `tasks()/people()/projects()/areas()/resources()`; added `pasta-common` dep to kb-fetchers (no cycle: `pasta-common → kb-core` only)
+  - FLAG: `kb-pipeline` (`registry.rs`, `entity_manager.rs`) still has `People`/`1. Projects` literals and no `pasta-common` dep — out of task-14 scope; fold into task 15 or a follow-up
   - _Requirements: 6.2, 6.4_
 
 - [ ] 15. Deduplicate shadowed constants

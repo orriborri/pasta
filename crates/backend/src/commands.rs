@@ -39,8 +39,7 @@ pub async fn handle(cmd: Command, state: &AppState, tx: &EventTx) {
                 // Reset timer so next tick fires it
                 sched.last_run.remove(&name);
                 // For fetch-group members, also reset the group
-                let fetch_names = ["gitlab", "linear", "slack", "gmail", "calendar"];
-                if fetch_names.contains(&name.as_str()) {
+                if pasta_common::data::FETCH_GROUP_NAMES.contains(&name.as_str()) {
                     sched.last_run.remove("fetch-cycle");
                 }
                 drop(sched);

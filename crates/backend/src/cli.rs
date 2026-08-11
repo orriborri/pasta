@@ -29,7 +29,7 @@ pub async fn route_tasks() -> anyhow::Result<()> {
     // Auto-create initiative files + subfolders from Roadmap/ if missing in Tasks/
     let vault = pasta_common::vault::vault_path();
     let layout = VaultLayout::new(Path::new(vault));
-    let roadmap_dir = layout.base().join("Roadmap");
+    let roadmap_dir = layout.roadmap();
     let tasks_dir = layout.tasks();
 
     if let Ok(entries) = std::fs::read_dir(&roadmap_dir) {

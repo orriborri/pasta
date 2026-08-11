@@ -83,7 +83,7 @@ async fn run_native_schedules(state: &AppState) {
     let config = &config::get().schedules;
 
     // Fetch cycle: gitlab/linear/slack/gmail/calendar run as one unit
-    let fetch_names: &[&str] = &["gitlab", "linear", "slack", "gmail", "calendar"];
+    let fetch_names = &pasta_common::data::FETCH_GROUP_NAMES;
     let fetch_enabled = fetch_names.iter().any(|n| config.get(*n).is_some_and(|e| e.enabled));
     let fetch_interval = fetch_names.iter()
         .filter_map(|n| config.get(*n).map(|e| e.interval_minutes))

@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 kb-core = { path = "../kb-core" }
+pasta-common = { path = "../common" }
 anyhow = { workspace = true }
 tokio = { workspace = true }
 chrono = { workspace = true }

@@ -4,21 +4,13 @@
 //! 1. Backfill calls kb_sync::run directly (no subprocess)
 //! 2. Success/failure is properly reported to the client
 
-use kb_sync;
 
 // Test 1: Backfill should call kb_sync::run, not spawn a subprocess
 #[tokio::test]
 async fn backfill_uses_kb_sync_library_directly() {
-    // We verify this by checking the implementation in commands.rs calls kb_sync::run
-    // The actual test is that the code compiles and kb_sync::run is the function being called
-    let sources = &["slack", "gmail", "linear"];
-    
-    // This test verifies the design - the implementation in commands.rs
-    // should call kb_sync::run(sources).await directly without subprocess
-    // The compilation of this file proves the function exists and is callable
-    let _ = kb_sync::run(sources);
-    
-    // If we got here, kb_sync::run is callable and was called directly
+    // Compile-time proof that kb_sync::run is the in-process entry point (no
+    // subprocess). Referencing the fn item avoids spawning a real fetch here.
+    let _run = kb_sync::run;
 }
 
 // Test 2: When kb_sync::run succeeds, the backend reports success
@@ -33,9 +25,8 @@ async fn backfill_reports_real_success() {
     
     let sources = &["slack"];
     match kb_sync::run(sources).await {
-        Ok(n) => {
+        Ok(_n) => {
             // Success - the Flash message would be: "kb sync complete: {n} records"
-            assert!(n > 0 || n == 0, "Record count should be non-negative");
         }
         Err(_) => {
             // If kb is not configured, this is expected - the test still passes

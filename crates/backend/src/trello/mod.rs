@@ -25,12 +25,13 @@ use pasta_common::vault::{self, STATUS_DONE, STATUS_OPEN, STATUS_PENDING, STATUS
 use crate::util::log;
 use client::{Card, TrelloClient};
 
-/// Board lists mapped to Kanban column tags, in board order.
+/// Board lists mapped to Kanban column tags, in board order. The tag half is
+/// the canonical `vault::COLUMN_TAGS`, so the column vocabulary lives in one place.
 const COLUMNS: [(&str, &str); 4] = [
-    ("Today", "today"),
-    ("This Week", "this-week"),
-    ("Later", "later"),
-    ("Backlog", "backlog"),
+    ("Today", vault::COLUMN_TAGS[0]),
+    ("This Week", vault::COLUMN_TAGS[1]),
+    ("Later", vault::COLUMN_TAGS[2]),
+    ("Backlog", vault::COLUMN_TAGS[3]),
 ];
 /// List holding completed work.
 const LIST_DONE: &str = "Done";
@@ -243,9 +244,9 @@ fn adopt_new_cards(
 fn linked_card_ids() -> std::collections::HashSet<String> {
     let vault = Path::new(vault::vault_path());
     let layout = VaultLayout::new(vault);
-    ["Tasks", "Archive"]
+    [layout.tasks(), layout.archive()]
         .iter()
-        .flat_map(|dir| vault::walk_md_files(&layout.base().join(dir)))
+        .flat_map(|dir| vault::walk_md_files(dir))
         .filter_map(|path| {
             let content = std::fs::read_to_string(path).ok()?;
             vault::frontmatter_value(&content, "trello_card").filter(|s| !s.is_empty())

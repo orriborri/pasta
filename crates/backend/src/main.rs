@@ -70,7 +70,7 @@ async fn main() -> anyhow::Result<()> {
     // --- Daemon mode ---
     let lock_path = dirs::home_dir().unwrap().join(".pasta/pasta.lock");
     fs::create_dir_all(lock_path.parent().unwrap())?;
-    let lock_file = fs::OpenOptions::new().create(true).read(true).write(true).open(&lock_path)?;
+    let lock_file = fs::OpenOptions::new().create(true).read(true).write(true).truncate(false).open(&lock_path)?;
     use std::os::unix::io::AsRawFd;
     if unsafe { libc::flock(lock_file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
         eprintln!("Another pasta-backend is already running");

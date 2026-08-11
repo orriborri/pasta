@@ -63,7 +63,7 @@ fn archive_stale_tasks() {
     let vault = Path::new(vault_path());
     let layout = VaultLayout::new(vault);
     let tasks_dir = layout.tasks();
-    let archive_dir = layout.archive().join("Tasks-Stale");
+    let archive_dir = layout.stale_archive();
     fs::create_dir_all(&archive_dir).ok();
 
     let mut archived = 0;
@@ -90,7 +90,7 @@ fn deduplicate_tasks() {
     let vault = Path::new(vault_path());
     let layout = VaultLayout::new(vault);
     let tasks_dir = layout.tasks();
-    let archive_dir = layout.archive().join("Tasks-Stale");
+    let archive_dir = layout.stale_archive();
     fs::create_dir_all(&archive_dir).ok();
 
     let files = walk_md_files(&tasks_dir);
@@ -135,11 +135,10 @@ fn deduplicate_tasks() {
         // Archive all but the first (richest)
         for (path, _) in &entries[1..] {
             let dest = archive_dir.join(path.file_name().unwrap_or_default());
-            if !dest.exists() {
-                if fs::rename(path, &dest).is_ok() {
+            if !dest.exists()
+                && fs::rename(path, &dest).is_ok() {
                     deduped += 1;
                 }
-            }
         }
     }
 
@@ -349,7 +348,7 @@ fn update_triage_patterns() {
     let vault = Path::new(vault_path());
     let layout = VaultLayout::new(vault);
     let tasks_dir = layout.tasks();
-    let column_tags = ["today", "this-week", "later", "backlog"];
+    let column_tags = pasta_common::vault::COLUMN_TAGS;
     let mut patterns = load_triage_patterns();
     let today = Local::now().format("%Y-%m-%d").to_string();
 

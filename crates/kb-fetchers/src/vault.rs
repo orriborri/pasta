@@ -20,9 +20,10 @@ impl VaultFetcher {
     /// Returns error if directory reading fails.
     pub fn fetch(&self) -> Result<Vec<Record>> {
         let mut records = Vec::new();
+        let layout = pasta_common::vault::VaultLayout::new(&self.vault_path);
 
         // Tasks
-        let tasks_dir = self.vault_path.join("Tasks");
+        let tasks_dir = layout.tasks();
         if tasks_dir.exists() {
             for path in walk_md(&tasks_dir) {
                 if let Some(r) = Self::file_to_record(&path, "task") {
@@ -32,7 +33,7 @@ impl VaultFetcher {
         }
 
         // People
-        let people_dir = self.vault_path.join("People");
+        let people_dir = layout.people();
         if people_dir.exists() {
             for path in walk_md(&people_dir) {
                 if let Some(r) = Self::file_to_record(&path, "person") {
@@ -42,7 +43,7 @@ impl VaultFetcher {
         }
 
         // Projects (1. Projects/)
-        let projects_dir = self.vault_path.join("1. Projects");
+        let projects_dir = layout.projects();
         if projects_dir.exists() {
             for path in walk_md(&projects_dir) {
                 if let Some(r) = Self::file_to_record(&path, "project") {
@@ -53,8 +54,7 @@ impl VaultFetcher {
 
         // Areas (2. Areas/) and Resources (3. Resources/) — PARA docs used by
         // vault organization (link repair, PARA audit).
-        for (folder, tag) in [("2. Areas", "area"), ("3. Resources", "resource")] {
-            let dir = self.vault_path.join(folder);
+        for (dir, tag) in [(layout.areas(), "area"), (layout.resources(), "resource")] {
             if dir.exists() {
                 for path in walk_md(&dir) {
                     if let Some(r) = Self::file_to_record(&path, tag) {
