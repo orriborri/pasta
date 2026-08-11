@@ -103,10 +103,9 @@
   - Log a warning naming the directory when a layout path is missing, instead of returning an empty listing — implemented; but see 12.1
   - _Requirements: 6.1, 6.3_
 
-- [ ] 12.1 Write tests for layout resolution and missing-directory warnings
-  - Assert each accessor composes the configured vault path
-  - Assert a missing directory produces a warning rather than a silent empty result
-  - ⚠ BLOCKING: three tests in `vault.rs` are `panic!("TODO: Implement stderr capture …")` stubs — they make `cargo test --workspace` **fail**. Implement the stderr capture or `#[ignore]` them.
+- [x] 12.1 Write tests for layout resolution and missing-directory warnings
+  - Assert each accessor composes the configured vault path — DONE (`vault_layout_*_path` tests)
+  - Assert a missing directory produces a warning rather than a silent empty result — DONE: `warn_if_missing` now returns whether it emitted a (deduplicated) warning; the two former `panic!("TODO")` stubs are real tests (missing→warns, repeat→suppressed). No stderr capture needed; `cargo test --workspace` passes.
   - _Requirements: 6.1, 6.3_
 
 - [ ] 13. Replace path literals in common and backend
@@ -132,7 +131,7 @@
 
 - [ ] 17. Add the CI gate
   - Workflow running `cargo build --workspace`, `cargo clippy --workspace -- -D warnings`, `cargo test --workspace`
-  - ⚠ BLOCKED: `-D warnings` fails on pre-existing clippy debt and `cargo test --workspace` fails on the task-12.1 panic stubs. Land 12.1 + the clippy cleanup (13/15) first, else the gate is red on arrival. `tests/ci_workflow.rs` stub exists.
+  - ⚠ PARTIALLY BLOCKED: `cargo test --workspace` now passes (12.1 fixed); `cargo clippy --workspace -- -D warnings` still fails on pre-existing debt — land the clippy cleanup (13/15) before enabling `-D warnings`. `tests/ci_workflow.rs` stub exists.
   - _Requirements: 8.5_
 
 - [ ] 18. Gather storage evidence
