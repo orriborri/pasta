@@ -19,5 +19,9 @@ serde = { workspace = true }
 chrono = { workspace = true }
 dirs = { workspace = true }
 
+[dev-dependencies]
+# Runtime for the `storage_evidence` example (async hybrid_search / lancedb).
+tokio = { workspace = true }
+
 [lints]
 workspace = true

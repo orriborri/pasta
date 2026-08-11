@@ -29,8 +29,9 @@ Tantivy and LanceDB in parallel and merges with Reciprocal Rank Fusion (RRF,
 k=60). `crates/backend/src/kb_search.rs::search` wraps that with pasta's
 over-fetch-then-filter (source/date/participant) for the TUI and MCP. There
 is no code path in the backend that queries Tantivy or LanceDB alone; the
-only "Tantivy-only" numbers in this document come from a throwaway benchmark
-written for measurement, not from production code.
+only "Tantivy-only" numbers in this document come from a benchmark harness
+written for measurement (`crates/kb-storage/examples/storage_evidence.rs`),
+not from production code.
 
 On disk: `index/` (Tantivy) is 5.6 MB, `vectors/` (LanceDB) is 8.8 MB,
 `state.db` is 592 KB, and `raw/` (Parquet) is 2.1 MB across 217 files, for
@@ -84,7 +85,9 @@ explicitly in the follow-up recommendation below.**
 
 ## 6.3 — Latency and quality: Tantivy-only vs hybrid
 
-Measured with a release build against the real corpus above, same five
+Reproduce with `cargo run -p kb-storage --example storage_evidence --release`
+(point at a store other than `~/.kb` via `KB_DATA_DIR`). The figures below were
+measured with a release build against the real corpus above, same five
 queries chosen from terms that actually appear in the indexed content
 (`meeting`, `deploy`, `pipeline`, `review`, `standup`), limit 10, index
 warmed (first call to each excluded):
