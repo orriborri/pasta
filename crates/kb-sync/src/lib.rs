@@ -1,15 +1,22 @@
 use anyhow::Result;
 use chrono::Local;
-use kb_core::{KbConfig, Record, Source, SyncState};
+use kb_core::{Record, Source, SyncState};
 use kb_storage::{embedder, ParquetStore, TextIndex, VectorStore};
+use pasta_common::vault::VaultLayout;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tracing::info;
 
 /// Sources that can be synced.
 pub const ALL_SOURCES: &[&str] = &["slack", "gmail", "linear", "git", "vault", "calendar", "gdocs"];
 
-const FEEDS_DIR: &str = "/home/orre/Obsidian/Readpeak/.feeds";
+/// Returns the feeds directory path using VaultLayout.
+/// This ensures the feeds directory is always relative to the configured vault path.
+#[must_use]
+pub fn feeds_dir() -> PathBuf {
+    let vault_path = Path::new(&pasta_common::config::get().general.vault_path);
+    VaultLayout::new(vault_path).feeds()
+}
 
 /// Fetch records from specified sources. Does NOT index them.
 /// `lookback_days` controls how far back to go for channels without cursors (default: 1 for scheduled, 30 for backfill).
@@ -25,7 +32,7 @@ pub async fn fetch(sources: &[&str]) -> Result<Vec<Record>> {
 /// # Errors
 /// Returns error if any fetcher fails critically.
 pub async fn fetch_with_lookback(sources: &[&str], lookback_days: i64) -> Result<Vec<Record>> {
-    let config = KbConfig::default();
+    let config = pasta_common::config::kb_config();
     let state = SyncState::open(&config)?;
 
     let mut all_records: Vec<Record> = Vec::new();
@@ -75,7 +82,7 @@ pub async fn index(records: Vec<Record>) -> Result<usize> {
         return Ok(0);
     }
 
-    let config = KbConfig::default();
+    let config = pasta_common::config::kb_config();
     embedder::init().await?;
 
     let state = SyncState::open(&config)?;
@@ -146,7 +153,8 @@ pub async fn run(sources: &[&str]) -> Result<usize> {
 
 /// Write `.feeds/` markdown files from fetched records, grouped by source.
 pub fn write_feeds(records: &[Record]) {
-    fs::create_dir_all(FEEDS_DIR).ok();
+    let feeds_path = feeds_dir();
+    fs::create_dir_all(&feeds_path).ok();
     let now = Local::now().format("%Y-%m-%dT%H:%M");
 
     for source in &[Source::Slack, Source::Gmail, Source::Linear, Source::Calendar] {
@@ -154,7 +162,7 @@ pub fn write_feeds(records: &[Record]) {
         let name = source.to_string();
         let body = format_feed(&source_records, *source);
         let content = format!("---\nsource: {name}\nfetched: {now}\n---\n\n{body}");
-        let path = Path::new(FEEDS_DIR).join(format!("{name}.md"));
+        let path = feeds_path.join(format!("{name}.md"));
         fs::write(path, content).ok();
     }
 }
@@ -330,4 +338,60 @@ async fn embed_and_upsert(vector: &VectorStore, records: &[Record]) -> Result<()
         info!(batch = i + 1, total_batches = records.len().div_ceil(50), "embedded");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Test that kb-sync's write_feeds uses VaultLayout instead of hardcoded path
+    #[test]
+    fn write_feeds_uses_vault_layout_for_feeds_dir() {
+        // This test verifies that write_feeds uses VaultLayout::feeds() instead
+        // of a hardcoded absolute path like "/home/orre/Obsidian/Readpeak/.feeds"
+        
+        let feeds_path = feeds_dir();
+        
+        // The path should end with .feeds
+        assert!(feeds_path.to_string_lossy().ends_with("/.feeds"));
+        
+        // The path should be constructed from the vault path in config
+        let config = pasta_common::config::get();
+        let vault_path = Path::new(&config.general.vault_path);
+        assert_eq!(feeds_path, vault_path.join(".feeds"));
+    }
+
+    /// Test that kb-sync uses configured vault path from config
+    #[test]
+    fn kb_sync_uses_configured_vault_path() {
+        // This test verifies that kb-sync uses the vault path from config
+        // rather than a hardcoded absolute path
+        
+        let config = pasta_common::config::get();
+        let vault_path = Path::new(&config.general.vault_path);
+        let feeds_path = feeds_dir();
+        
+        // The feeds directory should be a subdirectory of the vault path
+        assert!(feeds_path.starts_with(vault_path));
+        
+        // The path should be exactly vault_path/.feeds
+        assert_eq!(feeds_path, vault_path.join(".feeds"));
+    }
+
+    /// Test that feeds_dir returns a vault-relative path
+    #[test]
+    fn feeds_dir_is_vault_relative() {
+        // This test verifies that feeds_dir() returns a path relative to
+        // the configured vault path, not an absolute hardcoded path
+        
+        let config = pasta_common::config::get();
+        let vault_path = Path::new(&config.general.vault_path);
+        let feeds_path = feeds_dir();
+        
+        // The path should start with the vault path
+        assert!(feeds_path.starts_with(vault_path));
+        
+        // The path should end with .feeds
+        assert!(feeds_path.to_string_lossy().ends_with("/.feeds"));
+    }
 }

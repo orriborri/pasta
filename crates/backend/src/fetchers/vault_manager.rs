@@ -2,12 +2,13 @@ use chrono::{Local, NaiveDate};
 use std::fs;
 use std::path::Path;
 
-use pasta_common::vault::vault_path;
+use pasta_common::vault::{vault_path, VaultLayout};
 
 pub fn run() {
     archive_done_tasks();
     archive_stale_tasks();
     deduplicate_tasks();
+    backfill_issue_tags();
     close_merged_mr_tasks();
     flag_stale_tasks();
     check_project_integrity();
@@ -16,9 +17,36 @@ pub fn run() {
     route_new_tasks_sync();
 }
 
+/// Give Linear-sourced tasks an `issue:` frontmatter field (e.g. `AD-359`),
+/// derived from `source_url`, so the issue key is queryable without parsing the URL.
+fn backfill_issue_tags() {
+    let vault = Path::new(vault_path());
+    let layout = VaultLayout::new(vault);
+    let tasks_dir = layout.tasks();
+    let mut tagged = 0;
+
+    for path in walk_md_files(&tasks_dir) {
+        let Ok(content) = fs::read_to_string(&path) else { continue; };
+        if !has_frontmatter_value(&content, "source", "linear") { continue; }
+        if frontmatter_value(&content, "issue").is_some_and(|v| !v.is_empty()) { continue; }
+        let Some(url) = frontmatter_value(&content, "source_url") else { continue; };
+        let Some(issue_id) = extract_work_item_key(&url).and_then(|k| k.strip_prefix("lin:").map(str::to_string)) else { continue; };
+
+        let updated = pasta_common::vault::set_frontmatter(&content, "issue", &issue_id);
+        fs::write(&path, updated).ok();
+        tagged += 1;
+    }
+
+    if tagged > 0 {
+        crate::util::log("vault-manager", &format!("tagged {} linear tasks with issue id", tagged));
+    }
+}
+
 fn archive_done_tasks() {
-    let tasks_dir = Path::new(vault_path()).join("Tasks");
-    let archive_dir = Path::new(vault_path()).join("4. Archive");
+    let vault = Path::new(vault_path());
+    let layout = VaultLayout::new(vault);
+    let tasks_dir = layout.tasks();
+    let archive_dir = layout.archive();
     fs::create_dir_all(&archive_dir).ok();
 
     for path in walk_md_files(&tasks_dir) {
@@ -32,8 +60,10 @@ fn archive_done_tasks() {
 }
 
 fn archive_stale_tasks() {
-    let tasks_dir = Path::new(vault_path()).join("Tasks");
-    let archive_dir = Path::new(vault_path()).join("4. Archive/Tasks-Stale");
+    let vault = Path::new(vault_path());
+    let layout = VaultLayout::new(vault);
+    let tasks_dir = layout.tasks();
+    let archive_dir = layout.archive().join("Tasks-Stale");
     fs::create_dir_all(&archive_dir).ok();
 
     let mut archived = 0;
@@ -57,8 +87,10 @@ fn archive_stale_tasks() {
 fn deduplicate_tasks() {
     use std::collections::HashMap;
 
-    let tasks_dir = Path::new(vault_path()).join("Tasks");
-    let archive_dir = Path::new(vault_path()).join("4. Archive/Tasks-Stale");
+    let vault = Path::new(vault_path());
+    let layout = VaultLayout::new(vault);
+    let tasks_dir = layout.tasks();
+    let archive_dir = layout.archive().join("Tasks-Stale");
     fs::create_dir_all(&archive_dir).ok();
 
     let files = walk_md_files(&tasks_dir);
@@ -153,7 +185,9 @@ fn extract_mr_from_name(name: &str) -> Option<String> {
 }
 
 fn close_merged_mr_tasks() {
-    let tasks_dir = Path::new(vault_path()).join("Tasks");
+    let vault = Path::new(vault_path());
+    let layout = VaultLayout::new(vault);
+    let tasks_dir = layout.tasks();
 
     for path in walk_md_files(&tasks_dir) {
         let Ok(content) = fs::read_to_string(&path) else { continue; };
@@ -205,7 +239,9 @@ fn parse_mr_url(url: &str) -> Option<(String, &str)> {
 }
 
 fn flag_stale_tasks() {
-    let tasks_dir = Path::new(vault_path()).join("Tasks");
+    let vault = Path::new(vault_path());
+    let layout = VaultLayout::new(vault);
+    let tasks_dir = layout.tasks();
     let cutoff = Local::now().date_naive() - chrono::Duration::days(14);
 
     for path in walk_md_files(&tasks_dir) {
@@ -235,8 +271,10 @@ fn flag_stale_tasks() {
 }
 
 fn check_project_integrity() {
-    let projects_dir = Path::new(vault_path()).join("1. Projects");
-    let tasks_dir = Path::new(vault_path()).join("Tasks");
+    let vault = Path::new(vault_path());
+    let layout = VaultLayout::new(vault);
+    let projects_dir = layout.projects();
+    let tasks_dir = layout.tasks();
 
     let Ok(project_entries) = fs::read_dir(&projects_dir) else { return };
 
@@ -308,7 +346,9 @@ fn cleanup_old_logs() {
 fn update_triage_patterns() {
     use pasta_common::vault::{load_triage_patterns, save_triage_patterns, TriagePattern};
 
-    let tasks_dir = Path::new(vault_path()).join("Tasks");
+    let vault = Path::new(vault_path());
+    let layout = VaultLayout::new(vault);
+    let tasks_dir = layout.tasks();
     let column_tags = ["today", "this-week", "later", "backlog"];
     let mut patterns = load_triage_patterns();
     let today = Local::now().format("%Y-%m-%d").to_string();
@@ -390,7 +430,9 @@ fn update_triage_patterns() {
 
 fn find_initiatives() -> Vec<(String, String)> {
     // Returns (name, description) for each initiative — identified by having a matching subfolder
-    let tasks_dir = Path::new(vault_path()).join("Tasks");
+    let vault = Path::new(vault_path());
+    let layout = VaultLayout::new(vault);
+    let tasks_dir = layout.tasks();
     let mut initiatives = Vec::new();
     let Ok(entries) = fs::read_dir(&tasks_dir) else { return initiatives };
     for entry in entries.flatten() {
@@ -413,7 +455,9 @@ fn find_initiatives() -> Vec<(String, String)> {
 fn route_new_tasks_sync() {
     // Synchronous wrapper — routes tasks using simple keyword matching against initiatives
     // (LanceDB search requires async; for vault-maintenance we use keyword fallback)
-    let tasks_dir = Path::new(vault_path()).join("Tasks");
+    let vault = Path::new(vault_path());
+    let layout = VaultLayout::new(vault);
+    let tasks_dir = layout.tasks();
     let initiatives = find_initiatives();
     if initiatives.is_empty() { return; }
 
@@ -481,7 +525,9 @@ fn match_project_to_initiative(project: &str, initiative: &str) -> bool {
 
 /// Async version using LanceDB embeddings for semantic matching
 pub async fn route_new_tasks_semantic() {
-    let tasks_dir = Path::new(vault_path()).join("Tasks");
+    let vault = Path::new(vault_path());
+    let layout = VaultLayout::new(vault);
+    let tasks_dir = layout.tasks();
     let initiatives = find_initiatives();
     if initiatives.is_empty() { return; }
 
@@ -523,5 +569,218 @@ pub async fn route_new_tasks_semantic() {
     }
     if moved > 0 {
         crate::util::log("route-tasks", &format!("semantically routed {} tasks", moved));
+    }
+}
+
+#[cfg(test)]
+mod parser_tests {
+    use super::*;
+
+    // Tests for extract_work_item_key parser
+    #[test]
+    fn test_extract_work_item_key_linear_issue_url() {
+        // Example: "https://linear.app/readpeak/issue/AD-360/..." → "lin:AD-360"
+        let url = "https://linear.app/readpeak/issue/AD-360/some-title-here";
+        let result = extract_work_item_key(url);
+        assert_eq!(result, Some("lin:AD-360".to_string()));
+    }
+
+    #[test]
+    fn test_extract_work_item_key_gitlab_mr_url() {
+        // Example: "https://gitlab.com/readpeak/mononode/-/merge_requests/2955" → "gl:readpeak/mononode!2955"
+        let url = "https://gitlab.com/readpeak/mononode/-/merge_requests/2955";
+        let result = extract_work_item_key(url);
+        assert_eq!(result, Some("gl:readpeak/mononode!2955".to_string()));
+    }
+
+    #[test]
+    fn test_extract_work_item_key_with_query_params() {
+        let url = "https://gitlab.com/readpeak/mononode/-/merge_requests/2955?view=inline&pos=0";
+        let result = extract_work_item_key(url);
+        assert_eq!(result, Some("gl:readpeak/mononode!2955".to_string()));
+    }
+
+    #[test]
+    fn test_extract_work_item_key_with_fragment() {
+        let url = "https://gitlab.com/readpeak/mononode/-/merge_requests/2955#note_123456";
+        let result = extract_work_item_key(url);
+        assert_eq!(result, Some("gl:readpeak/mononode!2955".to_string()));
+    }
+
+    #[test]
+    fn test_extract_work_item_key_nested_project() {
+        let url = "https://gitlab.com/readpeak/group/subgroup/project/-/merge_requests/42";
+        let result = extract_work_item_key(url);
+        assert_eq!(result, Some("gl:readpeak/group/subgroup/project!42".to_string()));
+    }
+
+    #[test]
+    fn test_extract_work_item_key_rejects_unsupported_urls() {
+        let url = "https://github.com/user/repo/issues/123";
+        let result = extract_work_item_key(url);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_extract_work_item_key_with_trailing_slash() {
+        let url = "https://linear.app/readpeak/issue/AD-360/";
+        let result = extract_work_item_key(url);
+        assert_eq!(result, Some("lin:AD-360".to_string()));
+    }
+
+    #[test]
+    fn test_extract_work_item_key_strips_quotes() {
+        let url = "\"https://linear.app/readpeak/issue/AD-360/\"";
+        let result = extract_work_item_key(url);
+        assert_eq!(result, Some("lin:AD-360".to_string()));
+    }
+
+    #[test]
+    fn test_extract_work_item_key_linear_mixed_case() {
+        let url = "https://linear.app/readpeak/issue/ABC-123/title";
+        let result = extract_work_item_key(url);
+        assert_eq!(result, Some("lin:ABC-123".to_string()));
+    }
+
+    #[test]
+    fn test_extract_work_item_key_linear_short() {
+        let url = "https://linear.app/readpeak/issue/PROJ-1";
+        let result = extract_work_item_key(url);
+        assert_eq!(result, Some("lin:PROJ-1".to_string()));
+    }
+
+    #[test]
+    fn test_extract_work_item_key_long_iid() {
+        let url = "https://gitlab.com/readpeak/mononode/-/merge_requests/1234567890";
+        let result = extract_work_item_key(url);
+        assert_eq!(result, Some("gl:readpeak/mononode!1234567890".to_string()));
+    }
+
+    // Tests for extract_mr_from_name parser
+    #[test]
+    fn test_extract_mr_from_name_simple_mr() {
+        let name = "resolve-discussions-mr-2955-vitest";
+        let result = extract_mr_from_name(name);
+        assert_eq!(result, Some("mr:2955".to_string()));
+    }
+
+    #[test]
+    fn test_extract_mr_from_name_mrs_plural() {
+        let name = "fix-mrs-1234-bug";
+        let result = extract_mr_from_name(name);
+        assert_eq!(result, Some("mr:1234".to_string()));
+    }
+
+    #[test]
+    fn test_extract_mr_from_name_single_digit() {
+        let name = "mr-1-fix";
+        let result = extract_mr_from_name(name);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_extract_mr_from_name_two_digits() {
+        let name = "mr-12-fix";
+        let result = extract_mr_from_name(name);
+        assert_eq!(result, Some("mr:12".to_string()));
+    }
+
+    #[test]
+    fn test_extract_mr_from_name_three_digits() {
+        let name = "fix-tasks-mr-345";
+        let result = extract_mr_from_name(name);
+        assert_eq!(result, Some("mr:345".to_string()));
+    }
+
+    #[test]
+    fn test_extract_mr_from_name_at_start() {
+        let name = "mr-999-early-bird";
+        let result = extract_mr_from_name(name);
+        assert_eq!(result, Some("mr:999".to_string()));
+    }
+
+    #[test]
+    fn test_extract_mr_from_name_at_end() {
+        let name = "some-task-mr-42";
+        let result = extract_mr_from_name(name);
+        assert_eq!(result, Some("mr:42".to_string()));
+    }
+
+    #[test]
+    fn test_extract_mr_from_name_no_mr_pattern() {
+        let name = "some-task-without-mr";
+        let result = extract_mr_from_name(name);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_extract_mr_from_name_mixed_case() {
+        let name = "mr-Mr-123";
+        let result = extract_mr_from_name(name);
+        assert_eq!(result, None);
+    }
+
+    // Tests for parse_mr_url parser
+    #[test]
+    fn test_parse_mr_url_standard() {
+        let url = "https://gitlab.com/readpeak/project/-/merge_requests/123";
+        let result = parse_mr_url(url);
+        assert_eq!(result, Some(("readpeak%2Fproject".to_string(), "123")));
+    }
+
+    #[test]
+    fn test_parse_mr_url_nested_project() {
+        let url = "https://gitlab.com/readpeak/group/subgroup/project/-/merge_requests/42";
+        let result = parse_mr_url(url);
+        assert_eq!(result, Some(("readpeak%2Fgroup%2Fsubgroup%2Fproject".to_string(), "42")));
+    }
+
+    #[test]
+    fn test_parse_mr_url_with_query() {
+        let url = "https://gitlab.com/readpeak/mononode/-/merge_requests/2955?view=inline&pos=0";
+        let result = parse_mr_url(url);
+        assert_eq!(result, Some(("readpeak%2Fmononode".to_string(), "2955")));
+    }
+
+    #[test]
+    fn test_parse_mr_url_with_fragment() {
+        let url = "https://gitlab.com/readpeak/mononode/-/merge_requests/2955#note_123456";
+        let result = parse_mr_url(url);
+        assert_eq!(result, Some(("readpeak%2Fmononode".to_string(), "2955")));
+    }
+
+    #[test]
+    fn test_parse_mr_url_with_trailing_slash() {
+        let url = "https://gitlab.com/readpeak/mononode/-/merge_requests/2955/";
+        let result = parse_mr_url(url);
+        assert_eq!(result, Some(("readpeak%2Fmononode".to_string(), "2955")));
+    }
+
+    #[test]
+    fn test_parse_mr_url_rejects_non_mr() {
+        let url = "https://gitlab.com/readpeak/mononode/issues/123";
+        let result = parse_mr_url(url);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_parse_mr_url_rejects_github() {
+        let url = "https://github.com/user/repo/pull/123";
+        let result = parse_mr_url(url);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_parse_mr_url_strips_quotes() {
+        let url = "\"https://gitlab.com/readpeak/mononode/-/merge_requests/2955\"";
+        let result = parse_mr_url(url);
+        assert_eq!(result, Some(("readpeak%2Fmononode".to_string(), "2955")));
+    }
+
+    #[test]
+    fn test_parse_mr_url_long_iid() {
+        let url = "https://gitlab.com/readpeak/mononode/-/merge_requests/1234567890";
+        let result = parse_mr_url(url);
+        assert_eq!(result, Some(("readpeak%2Fmononode".to_string(), "1234567890")));
     }
 }

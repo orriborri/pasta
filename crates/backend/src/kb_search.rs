@@ -4,21 +4,8 @@
 //! participant filters are applied pre-limit (over-fetch then filter) since
 //! `hybrid_search` itself takes no filter arguments.
 
-use std::path::PathBuf;
-
-use kb_core::KbConfig;
 use kb_storage::{embedder, hybrid_search};
 use pasta_common::ipc::SearchResultItem;
-
-/// Resolve the kb-engine data dir from pasta config (`[kb] data_dir`).
-pub(crate) fn kb_config() -> KbConfig {
-    let dir = &pasta_common::config::get().kb.data_dir;
-    if dir.is_empty() {
-        KbConfig::default()
-    } else {
-        KbConfig { data_dir: PathBuf::from(dir) }
-    }
-}
 
 /// Search kb-engine, mapping hits to the TUI's `SearchResultItem`.
 ///
@@ -32,7 +19,7 @@ pub async fn search(
     limit: usize,
 ) -> anyhow::Result<Vec<SearchResultItem>> {
     embedder::init().await?;
-    let cfg = kb_config();
+    let cfg = pasta_common::config::kb_config();
 
     // Over-fetch so post-filtering still yields up to `limit` results.
     let overfetch = limit.saturating_mul(3).max(limit);

@@ -20,7 +20,7 @@ mod client;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use pasta_common::vault::{self, STATUS_DONE, STATUS_OPEN, STATUS_PENDING, STATUS_REJECTED};
+use pasta_common::vault::{self, STATUS_DONE, STATUS_OPEN, STATUS_PENDING, STATUS_REJECTED, VaultLayout};
 
 use crate::util::log;
 use client::{Card, TrelloClient};
@@ -204,7 +204,9 @@ fn adopt_new_cards(
     let linked = linked_card_ids();
     let list_names: HashMap<&str, &str> =
         lists.iter().map(|(name, id)| (id.as_str(), name.as_str())).collect();
-    let tasks_dir = Path::new(vault::vault_path()).join("Tasks");
+    let vault = Path::new(vault::vault_path());
+    let layout = VaultLayout::new(vault);
+    let tasks_dir = layout.tasks();
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
 
     for card in cards.iter().filter(|c| !c.closed) {
@@ -240,9 +242,10 @@ fn adopt_new_cards(
 /// re-adopted from their leftover cards.
 fn linked_card_ids() -> std::collections::HashSet<String> {
     let vault = Path::new(vault::vault_path());
-    ["Tasks", "4. Archive"]
+    let layout = VaultLayout::new(vault);
+    ["Tasks", "Archive"]
         .iter()
-        .flat_map(|dir| vault::walk_md_files(&vault.join(dir)))
+        .flat_map(|dir| vault::walk_md_files(&layout.base().join(dir)))
         .filter_map(|path| {
             let content = std::fs::read_to_string(path).ok()?;
             vault::frontmatter_value(&content, "trello_card").filter(|s| !s.is_empty())
@@ -364,7 +367,9 @@ fn description(content: &str) -> String {
 /// Task files eligible for sync: everything under `Tasks/` with a `status`.
 /// Initiative parent files (no status) and Kanban boards are skipped.
 fn load_task_files() -> Vec<TaskFile> {
-    let dir = Path::new(vault::vault_path()).join("Tasks");
+    let vault = Path::new(vault::vault_path());
+    let layout = VaultLayout::new(vault);
+    let dir = layout.tasks();
     vault::walk_md_files(&dir)
         .into_iter()
         .filter_map(|path| {

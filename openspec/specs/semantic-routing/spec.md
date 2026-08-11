@@ -2,22 +2,27 @@
 
 ## Purpose
 
-Automatically route new tasks into matching initiative subfolders using vector similarity, linking execution (Tasks/) to planning (Roadmap/).
+Automatically route new tasks into matching initiative subfolders using the
+knowledge-base hybrid search, linking execution (Tasks/) to planning (Roadmap/).
 
 ## Requirements
 
 ### Requirement: Auto-route new tasks to matching initiative
-The system SHALL embed each new task's title and content, search for the most similar initiative in LanceDB, and move the task file into that initiative's subfolder when similarity exceeds 0.7.
+The system SHALL query the knowledge-base hybrid search for each new task's
+title (scoped to `source=vault`, top 3 hits) and move the task file into an
+initiative's subfolder when one of those hits names a known initiative
+(case-insensitive substring match on the hit's path or content). No fixed
+similarity threshold is applied — matching is by an initiative name appearing in
+the retrieved results.
 
-#### Scenario: Task matches an initiative with high confidence
+#### Scenario: Task matches an initiative
 - **WHEN** a task "Add Prometheus scrape targets" is created in `Tasks/` root
-- **AND** the initiative `Tasks/Monitoring.md` has description "Full observability stack: metrics, alerting, dashboards"
-- **AND** cosine similarity between their embeddings is 0.82
+- **AND** a top-3 hybrid-search hit for that title references the `Monitoring` initiative
 - **THEN** the task file is moved to `Tasks/Monitoring/Add-prometheus-scrape-targets.md`
 
 #### Scenario: Task does not match any initiative
 - **WHEN** a task "Reply to Felix about Swedish publisher" is created in `Tasks/` root
-- **AND** no initiative embedding has similarity > 0.7
+- **AND** none of the top-3 hits name a known initiative
 - **THEN** the task file stays at `Tasks/` root (appears in Uncategorized on Kanban)
 
 #### Scenario: Task already in a subfolder is not re-routed
@@ -41,7 +46,7 @@ The system SHALL provide a `--route-tasks` CLI flag that processes all existing 
 
 #### Scenario: Initial migration
 - **WHEN** user runs `pasta-backend --route-tasks`
-- **THEN** all root-level `.md` files in `Tasks/` are evaluated against initiatives and moved if similarity > 0.7
+- **THEN** all root-level `.md` files in `Tasks/` are evaluated against initiatives and moved when a top-3 hybrid-search hit names a matching initiative
 
 ### Requirement: Initiative detection
 The system SHALL identify initiative files as any `.md` file in `Tasks/` root that has a corresponding subfolder with the same stem name (e.g., `Tasks/Monitoring.md` + `Tasks/Monitoring/`).

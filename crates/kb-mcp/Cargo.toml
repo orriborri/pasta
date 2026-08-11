@@ -10,6 +10,7 @@ path = "src/main.rs"
 [dependencies]
 kb-core = { path = "../kb-core" }
 kb-storage = { path = "../kb-storage" }
+pasta-common = { path = "../common" }
 rmcp = { version = "1.7", features = ["server", "transport-io"] }
 tokio = { workspace = true }
 serde = { workspace = true }

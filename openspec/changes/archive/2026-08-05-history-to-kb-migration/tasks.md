@@ -32,8 +32,8 @@
 ## 5. Verify before deletion
 
 - [x] 5.1 Build the workspace (cargo build --workspace green); running `kb sync` to populate `~/.kb` requires the live env
-- [ ] 5.2 Smoke-test backend search and semantic routing return kb-engine results
-- [ ] 5.3 Smoke-test daily-note generation and vault organize from the relocated module
+- [ ] 5.2 Smoke-test backend search and semantic routing return kb-engine results — not re-exercised during 2026-08-05 reconciliation
+- [ ] 5.3 Smoke-test daily-note generation and vault organize from the relocated module — not re-exercised during 2026-08-05 reconciliation
 
 ## 6. Remove dead history/ modules
 

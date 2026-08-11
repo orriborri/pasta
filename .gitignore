@@ -1,5 +1,8 @@
 /target
 
+# Machine-local: points worktree builds at a shared target-dir (absolute path)
+/.cargo/config.toml
+
 # Runtime state and generated output
 /logs
 /.feeds
@@ -11,3 +14,6 @@
 
 # Stray literal-tilde dir created when a `~` path isn't expanded
 /~
+
+# Ralph execution state
+.ralph/

@@ -29,8 +29,9 @@ const REGISTRY: &[NativeEntry] = &[
 
 // The fetch cycle runs all native fetchers together as one unit.
 // Individual fetcher names (gitlab, linear, etc.) all map to the same function
-// but we track them as a group under "fetch-cycle".
-const FETCH_GROUP: &str = "fetch-cycle";
+// but we track them as a group under "fetch-cycle". Both the scheduler and the
+// manual ForceFetch command take this marker, so only one cycle runs at a time.
+pub const FETCH_GROUP: &str = "fetch-cycle";
 
 fn run_fetch_cycle(state: AppState) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     Box::pin(async move {

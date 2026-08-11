@@ -50,6 +50,44 @@ pub fn config_path() -> PathBuf {
     dirs::home_dir().unwrap().join(".pasta/config.toml")
 }
 
+/// Resolve the kb-engine data dir from pasta config (`[kb] data_dir`).
+/// When data_dir is empty, returns `KbConfig::default()` (`~/.kb`).
+/// When data_dir is set, returns `KbConfig` with the configured path.
+///
+/// This is the single resolution site for the kb data dir — every consumer
+/// (kb-sync, kb-cli, kb-mcp, and the backend readers/search) routes through it
+/// so ingestion and search always agree on where the store lives.
+pub fn kb_config() -> kb_core::KbConfig {
+    kb_config_for(&get().kb.data_dir)
+}
+
+/// Pure resolution of a data-dir string to a `KbConfig`. Split out from
+/// [`kb_config`] so the empty-vs-configured behaviour is unit-testable without
+/// the process-global config singleton (Req 5.8: a scratch `data_dir` is honoured).
+fn kb_config_for(dir: &str) -> kb_core::KbConfig {
+    if dir.is_empty() {
+        kb_core::KbConfig::default()
+    } else {
+        kb_core::KbConfig { data_dir: std::path::PathBuf::from(dir) }
+    }
+}
+
+#[cfg(test)]
+mod kb_config_tests {
+    use super::kb_config_for;
+
+    #[test]
+    fn empty_data_dir_falls_back_to_the_default() {
+        assert_eq!(kb_config_for("").data_dir, kb_core::KbConfig::default().data_dir);
+    }
+
+    #[test]
+    fn configured_scratch_data_dir_is_honoured() {
+        let scratch = "/tmp/pasta-scratch-kb";
+        assert_eq!(kb_config_for(scratch).data_dir, std::path::PathBuf::from(scratch));
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct AppConfig {
@@ -120,34 +158,12 @@ pub struct GogConfig {
 #[serde(default)]
 pub struct KbSection {
     pub data_dir: String,
-    pub sync_on_fetch: bool,
-    pub sources: Vec<String>,
+    // Fetch sources are hardcoded per call site (fetch_cycle.rs / commands.rs);
+    // there is no config-driven source list, so no `sources`/`sync_on_fetch` here.
     /// Email domains considered internal (auto-create People/ files for these).
     pub internal_domains: Vec<String>,
     /// Slack workspace members are considered internal if true.
     pub internal_slack: bool,
-    /// Rules for auto-creating tasks from kb records.
-    pub task_rules: TaskRules,
-    /// When true, records matching an `auto_create` rule are written as
-    /// `status: pending` tasks that must be approved before they become active.
-    /// `ask` rules always produce pending tasks regardless of this flag.
-    pub require_task_approval: bool,
-}
-
-#[derive(Debug, Clone, Deserialize, Default)]
-#[serde(default)]
-pub struct TaskRules {
-    pub auto_create: Vec<TaskRule>,
-    pub ask: Vec<TaskRule>,
-    pub skip: Vec<TaskRule>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct TaskRule {
-    pub source: String,
-    pub signal: String,
-    #[serde(rename = "match")]
-    pub match_expr: String,
 }
 
 /// Trello board sync. Credentials come from here or, when empty, from the
@@ -224,12 +240,8 @@ impl Default for KbSection {
     fn default() -> Self {
         Self {
             data_dir: dirs::home_dir().unwrap().join(".kb").to_string_lossy().to_string(),
-            sync_on_fetch: true,
-            sources: vec!["slack".into(), "gmail".into(), "linear".into(), "git".into(), "vault".into()],
             internal_domains: vec!["@readpeak.com".into()],
             internal_slack: true,
-            task_rules: TaskRules::default(),
-            require_task_approval: true,
         }
     }
 }
@@ -311,15 +323,8 @@ slack_api = ""
 linear_api = ""
 kiro_cli = ""
 
-[kb]
-# Tasks derived from kb records are written as `status: pending` and must be
-# approved in the TUI Tasks tab (a = approve, d = reject) before they go active.
-# Set to false to let [kb.task_rules.auto_create] matches create active tasks
-# directly. `ask` rules always require approval.
-require_task_approval = true
-
-# Two-way sync between Tasks/ and a Trello board. Pending tasks stay local —
-# only approved work reaches the board. Lists Today / This Week / Later /
+# Two-way sync between Tasks/ and a Trello board.
+# Lists Today / This Week / Later /
 # Backlog / Done are created if missing and map to the Kanban column tags.
 # Cards you create on the board become task files.
 # Leave api_key/token empty and export TRELLO_API_KEY / TRELLO_TOKEN instead:

@@ -52,7 +52,6 @@ pub enum Event {
     Chat { chat_type: ChatEventType },
     Flash { message: String },
     SearchResults { results: Vec<SearchResultItem> },
-    SyncProgress { stage: String, done: usize, total: usize },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

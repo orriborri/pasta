@@ -68,16 +68,10 @@ In `~/.pasta/config.toml`:
 ```toml
 [kb]
 data_dir = "~/.kb"
-sync_on_fetch = true
-sources = ["slack", "gmail", "linear", "git", "vault"]
 
 # Auto-create People/ files for contacts matching these
 internal_domains = ["@readpeak.com"]
 internal_slack = true
-
-[schedules.kb-sync]
-interval_minutes = 60
-enabled = true
 ```
 
 ## Commands

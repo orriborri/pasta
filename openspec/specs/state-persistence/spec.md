@@ -6,28 +6,6 @@ Concurrency-safe, corruption-resistant persistence of daemon sync state and rela
 
 ## Requirements
 
-### Requirement: Atomic state file writes
-The system SHALL use exclusive file locking (`flock`) when writing `_sync_state.json` to prevent concurrent write corruption.
-
-#### Scenario: Two tasks save state concurrently
-- **WHEN** the indexer writer task and fetch_cycle both attempt to save state simultaneously
-- **THEN** the second writer blocks until the first completes, and both writes are fully persisted without data loss
-
-#### Scenario: State read during write
-- **WHEN** `load_state` is called while another task holds the write lock
-- **THEN** it uses a shared lock and waits for the writer to finish before reading
-
-### Requirement: Indexer does not overwrite its own hash updates
-The system SHALL NOT save a pre-indexing state snapshot after `index_new_files` completes, since the indexer persists hashes internally during execution.
-
-#### Scenario: fetch_cycle calls indexer
-- **WHEN** `fetch_cycle::run` calls `index_new_files` which persists file hashes internally
-- **THEN** no stale state snapshot is saved after the indexer returns
-
-#### Scenario: CLI sync_once calls run_sync
-- **WHEN** `run_sync` completes indexing and the caller saves state afterward
-- **THEN** it reloads fresh state from disk (reflecting indexer's writes) before saving its own fields
-
 ### Requirement: Parallel sync state merge preserves concurrent updates
 The system SHALL reload state from disk after parallel sync tasks complete, then apply source-specific field updates, rather than saving a clone taken before the parallel execution.
 
@@ -81,13 +59,6 @@ The system SHALL resolve the log directory path from the daemon's known location
 #### Scenario: Daemon started from different working directory
 - **WHEN** `cleanup_old_logs` runs and the daemon's CWD is not the pasta project root
 - **THEN** it still correctly finds and cleans logs from the pasta project's `logs/` directory
-
-### Requirement: Linear history sync uses configured binary path
-The system SHALL use `resolve_binary("linear-api", ...)` in `history/sync_linear.rs` instead of a hardcoded path.
-
-#### Scenario: linear-api binary configured in pasta.toml
-- **WHEN** `[binaries] linear_api = "/custom/path/linear-api"` is set in config
-- **THEN** history sync uses that configured path
 
 ### Requirement: Stale task flag is reversible
 The system SHALL remove the `stale: true` frontmatter field when a task is updated (status change, due date added, or manual edit detected via mtime).

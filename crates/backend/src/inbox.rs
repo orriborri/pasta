@@ -12,11 +12,11 @@
 use std::path::Path;
 
 use chrono::Duration;
-use kb_core::{KbConfig, Record};
+use kb_core::Record;
 use kb_storage::ParquetStore;
 use pasta_common::config;
 use pasta_common::task_match::{classify, Action, MatchAttrs};
-use pasta_common::vault::{STATUS_OPEN, STATUS_PENDING};
+use pasta_common::vault::{STATUS_OPEN, STATUS_PENDING, VaultLayout};
 
 use crate::util::log;
 
@@ -25,7 +25,7 @@ use crate::util::log;
 /// # Errors
 /// Returns an error if reading from Parquet store fails.
 pub async fn process(days: i64) -> anyhow::Result<()> {
-    let config = KbConfig::default();
+    let config = pasta_common::config::kb_config();
     let store = ParquetStore::new(&config);
     let all_records = store.read_all()?;
 
@@ -101,7 +101,8 @@ fn kind_to_string(kind: &kb_core::Kind) -> String {
 /// rejected, which keep their file so they are not proposed again.
 fn create_task(r: &Record, signal: Option<&str>, status: &str) -> bool {
     let vault = pasta_common::vault::vault_path();
-    let path = Path::new(vault).join("Tasks").join(format!("kb-{}.md", slugify(&r.id)));
+    let layout = VaultLayout::new(Path::new(vault));
+    let path = layout.tasks().join(format!("kb-{}.md", slugify(&r.id)));
     if path.exists() {
         return false;
     }

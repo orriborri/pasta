@@ -1,3 +1,5 @@
+# Design Document
+
 ## Context
 
 pasta is 9,703 lines across 12 crates. The crate split is sound and clippy is nearly silent under pedantic+nursery, but the tree holds three coexisting generations of architecture: the retired `history/` LanceDB index, the standalone `kb` engine invoked as a subprocess, and the current in-process `kb-sync` library. Each migration landed as addition without deletion.
@@ -71,3 +73,14 @@ Rollback is per-phase `git revert`. No data migration: no on-disk format changes
 - **`crates/mcp`'s `search_tasks` / `get_feeds` / `get_people` are not reintroduced.** Nothing consumes them today. They are named in the proposal so they can be added to `kb-mcp` deliberately if a client ever wants them.
 - **The leftover `~/.kb/sync_state.db` and `sync_state.json` are deleted** in phase 1, noted in the commit message. Confirmed inert — no code reads either path.
 - **`kb-cli` stays.** It remains the only way to run `reindex` and `reprocess`. It stops being load-bearing for the daemon but continues as a user-facing CLI. Revisit only if the storage change removes those commands.
+
+
+## Execution Notes for Ralph
+
+This spec is mostly subtraction, which fits a TDD loop poorly. Two constraints matter:
+
+**Deletion tasks have no RED phase.** "Delete `crates/search`" cannot be driven by a failing test. For those tasks the verification contract is: `cargo build --workspace` succeeds, `cargo clippy --workspace` reports no new warnings, and a grep proves no remaining references to the deleted item. Tasks marked `[deletion]` in the plan below use that contract instead of a new test. Tasks that change behaviour (Requirements 2, 4, 5, 6) do have testable outcomes and carry explicit test sub-tasks.
+
+**Run with `parallel: 1` for this spec.** Nearly every phase touches `crates/common/src/vault.rs` — the frontmatter helpers, `load_tasks`, the `Task` type, and `VaultLayout` all live there. Four concurrent worktrees editing that file would produce merge conflicts on almost every task. Set `execution.parallel: 1` in `ralph.yaml` before running, and restore it afterwards if other specs benefit from concurrency.
+
+**Task ordering is load-bearing.** Phase 3 must complete before phase 5, because `VaultLayout` replaces the path literals that phase 3's `Task` path change touches. Phase 4 must complete before task 4.7 reverts the launcher workaround. Do not reorder.

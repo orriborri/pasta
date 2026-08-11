@@ -1,7 +1,6 @@
 use rmcp::{ServiceExt, schemars, tool, tool_router, transport::stdio};
 use rmcp::handler::server::wrapper::Parameters;
 
-use kb_core::KbConfig;
 use kb_storage::{embedder, hybrid_search};
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -21,7 +20,7 @@ struct KbServer;
 impl KbServer {
     #[tool(description = "Search the knowledge base using hybrid search (semantic + full-text). Returns relevant messages, threads, issues, and documents.")]
     async fn search_knowledge(&self, Parameters(p): Parameters<SearchKnowledgeParams>) -> String {
-        let config = KbConfig::default();
+        let config = pasta_common::config::kb_config();
         if let Err(e) = embedder::init().await {
             return format!("Embedder init error: {e}");
         }

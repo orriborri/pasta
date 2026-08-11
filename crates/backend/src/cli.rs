@@ -1,6 +1,9 @@
 // Vault-organization and task-routing entrypoints. Knowledge-base sync/reindex
 // is owned by kb-engine (`kb sync`, `kb reindex`).
 
+use pasta_common::vault::VaultLayout;
+use std::path::Path;
+
 pub async fn organize() -> anyhow::Result<()> {
     // Vault indexing is owned by kb-engine (`kb sync --source vault`); here we
     // only run the kb-backed link repair and PARA audit.
@@ -25,8 +28,9 @@ pub async fn weekly() -> anyhow::Result<()> {
 pub async fn route_tasks() -> anyhow::Result<()> {
     // Auto-create initiative files + subfolders from Roadmap/ if missing in Tasks/
     let vault = pasta_common::vault::vault_path();
-    let roadmap_dir = std::path::Path::new(vault).join("Roadmap");
-    let tasks_dir = std::path::Path::new(vault).join("Tasks");
+    let layout = VaultLayout::new(Path::new(vault));
+    let roadmap_dir = layout.base().join("Roadmap");
+    let tasks_dir = layout.tasks();
 
     if let Ok(entries) = std::fs::read_dir(&roadmap_dir) {
         for entry in entries.flatten() {

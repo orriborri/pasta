@@ -55,7 +55,7 @@ async fn main() -> Result<()> {
         .init();
 
     let cli = Cli::parse();
-    let config = KbConfig::default();
+    let config = pasta_common::config::kb_config();
 
     match cli.command {
         Cmd::Sync { source } => cmd_sync(&config, source.as_deref()).await,
@@ -214,9 +214,6 @@ async fn cmd_reprocess(config: &KbConfig) -> Result<()> {
     embed_and_upsert(&vector, &records).await?;
 
     println!("✓ Reprocessed {} records through pipeline (model: {})", records.len(), embedder::model_name());
-
-    // Build cross-reference table
-    kb_storage::work_items::build_work_items(config, &records)?;
 
     Ok(())
 }

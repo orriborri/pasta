@@ -6,6 +6,7 @@ pkgs.mkShell {
     pkg-config
     openssl
     ollama
+    mold          # fast linker; wired via .cargo/config.toml rustflags
   ];
 
   PROTOC = "${pkgs.protobuf}/bin/protoc";

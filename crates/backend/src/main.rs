@@ -3,7 +3,6 @@ mod cli;
 mod commands;
 mod fetch_cycle;
 mod fetchers;
-mod inbox;
 mod kb_search;
 mod vault_organize;
 mod process;
@@ -67,11 +66,6 @@ async fn main() -> anyhow::Result<()> {
     }
     if has("--route-tasks") { return cli::route_tasks().await; }
     if has("--sync-trello") { return cli::sync_trello().await; }
-    if has("--process-inbox") {
-        let days = args.iter().skip_while(|a| *a != "--process-inbox")
-            .nth(1).and_then(|s| s.parse().ok()).unwrap_or(2);
-        return inbox::process(days).await;
-    }
 
     // --- Daemon mode ---
     let lock_path = dirs::home_dir().unwrap().join(".pasta/pasta.lock");

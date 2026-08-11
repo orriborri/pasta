@@ -2,24 +2,29 @@
 
 ## Purpose
 
-Apply source, participant, and date filters inside the vector search query (pre-limit) so result counts are honored, consistently across the MCP and backend search paths.
+Apply source, participant, and date filters around the knowledge-base hybrid
+search so requested result counts are honored, through a single search entry
+point (`crates/backend/src/kb_search.rs`).
 
 ## Requirements
 
-### Requirement: Vector search applies filters before limit
-The system SHALL apply source, participant, and date filters as part of the vector search query (pre-limit) rather than filtering results after retrieval.
+### Requirement: Over-fetch then filter to honor the limit
+`hybrid_search` takes no filter arguments, so the system SHALL over-fetch and
+then apply source, participant, and date filters in
+`crates/backend/src/kb_search.rs`, taking up to `limit` results after filtering.
 
 #### Scenario: Search with source filter and limit of 10
 - **WHEN** a user searches with `source=slack` and `limit=10`
-- **THEN** all 10 returned results have `source=slack` (not fewer due to post-filtering)
+- **THEN** `kb_search` over-fetches (limit × 3), filters to `source=slack`, and returns up to 10 matching results
 
 #### Scenario: Search with after-date filter
 - **WHEN** a user searches with `after=2026-01-01` and `limit=5`
-- **THEN** all 5 results have dates on or after 2026-01-01
+- **THEN** results are filtered to dates on or after 2026-01-01 before taking up to 5
 
-### Requirement: MCP and backend search use consistent filtering
-Both `crates/mcp/src/main.rs` and `crates/backend/src/history/indexer.rs` search functions SHALL use the same pre-limit filtering approach.
+### Requirement: Single search entry point
+The system SHALL expose one search entry point (`kb_search::search`) used by the
+daemon. There is no separate MCP search path in this workspace.
 
-#### Scenario: MCP search matches backend search
-- **WHEN** the same query with filters is executed via MCP tool and via backend Command::Search
-- **THEN** both return identical results
+#### Scenario: Backend search goes through the single path
+- **WHEN** a query with filters is executed via `Command::Search`
+- **THEN** it is served by `kb_search::search` using the over-fetch-then-filter approach

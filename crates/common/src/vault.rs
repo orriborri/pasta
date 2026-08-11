@@ -353,26 +353,6 @@ fn parse_task(path: &Path) -> Option<Task> {
     })
 }
 
-pub fn load_inbox() -> Vec<InboxItem> {
-    let layout = VaultLayout::new(Path::new(vault_path()));
-    let path = layout.inbox().join("Inbox.md");
-    let Ok(content) = fs::read_to_string(&path) else { return vec![] };
-
-    content
-        .lines()
-        .filter(|l| l.starts_with("- [") || l.starts_with("## "))
-        .map(|l| {
-            if l.starts_with("## ") {
-                InboxItem { text: l[3..].to_string(), checked: false }
-            } else {
-                let checked = l.starts_with("- [x]");
-                let text = l.get(6..).unwrap_or("").to_string();
-                InboxItem { text, checked }
-            }
-        })
-        .collect()
-}
-
 pub fn load_waiting() -> Vec<WaitingItem> {
     let vault_path = Path::new(vault_path());
     let path = vault_path.join("Waiting For.md");
@@ -394,12 +374,6 @@ pub fn load_waiting() -> Vec<WaitingItem> {
             }
         })
         .collect()
-}
-
-pub fn today_daily_exists() -> bool {
-    let layout = VaultLayout::new(Path::new(vault_path()));
-    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
-    layout.daily_note(&today).exists()
 }
 
 pub fn update_task_priority(task: &Task, new_priority: &str) {
@@ -546,6 +520,32 @@ mod tests {
         let updated = fs::read_to_string(&task_path).unwrap();
         assert!(updated.contains("status: open"), "approval must land at the real path: {updated}");
     }
+
+    #[test]
+    fn task_count_is_unchanged_across_a_routing_move() {
+        let scratch = ScratchDir::new("routing_move");
+        let tasks_dir = scratch.path().join("Tasks");
+        let sub_dir = tasks_dir.join("Some Initiative");
+        fs::create_dir_all(&sub_dir).unwrap();
+
+        // Two tasks start at the top level of the task directory.
+        fs::write(tasks_dir.join("stays-put.md"), TASK_MD).unwrap();
+        let before_path = tasks_dir.join("gets-routed.md");
+        fs::write(&before_path, TASK_MD).unwrap();
+
+        let before = load_tasks_from(&tasks_dir);
+        assert_eq!(before.len(), 2, "both tasks visible before the move");
+
+        // Simulate semantic routing relocating one task into an initiative
+        // subfolder (the same rename `route_new_tasks_semantic` performs).
+        let after_path = sub_dir.join("gets-routed.md");
+        fs::rename(&before_path, &after_path).unwrap();
+
+        let after = load_tasks_from(&tasks_dir);
+        assert_eq!(after.len(), 2, "routing into a subfolder must not change the task count");
+        assert!(after.iter().any(|t| t.path == after_path), "routed task now loads from its subfolder path");
+        assert!(after.iter().any(|t| t.path == tasks_dir.join("stays-put.md")), "the untouched task still loads");
+    }
     // --- VaultLayout Red Phase Tests (expecting implementation) ---
 
     /// Test that VaultLayout exists and provides paths for all vault directories
@@ -671,7 +671,27 @@ mod tests {
         // Should log a warning when accessing missing directory
         let layout = VaultLayout::new(vault_path);
         let _tasks = layout.tasks();
-        // Warning should be logged - verify via test output
+        // TODO: Capture stderr and assert warning message contains "Warning: vault directory missing: Tasks"
+        // Current state: Test passes but doesn't verify stderr output
+        panic!("TODO: Implement stderr capture to verify warning message");
+    }
+
+    /// Test that VaultLayout only logs a warning once per directory (deduplication)
+    #[test]
+    fn vault_layout_warns_once_per_directory() {
+        let scratch = ScratchDir::new("dedup");
+        let vault_path = scratch.path();
+        // Intentionally don't create any directories
+
+        let layout = VaultLayout::new(vault_path);
+        
+        // Call tasks() multiple times
+        let _tasks1 = layout.tasks();
+        let _tasks2 = layout.tasks();
+        
+        // TODO: Verify only one warning was logged (not two)
+        // This requires capturing stderr and counting occurrences of the warning
+        panic!("TODO: Implement stderr capture to verify warning deduplication");
     }
 
     /// Test that VaultLayout is a singleton pattern - one instance for the vault
@@ -696,6 +716,90 @@ mod tests {
         // This test verifies that no literal paths like "Tasks", "0. Inbox", etc.
         // appear outside of VaultLayout in the codebase
         // (Verified via grep search, not a runtime test)
+    }
+
+    // --- Task 7: characterization tests pinning frontmatter-helper behavior ---
+
+    const FM_DOC: &str = "---\ntitle: Note\nstatus: open\n---\nBody line one\nBody line two\n";
+
+    #[test]
+    fn set_frontmatter_upserts_an_existing_key() {
+        let out = set_frontmatter(FM_DOC, "status", "draft");
+        assert!(out.contains("status: draft"));
+        assert!(!out.contains("status: open"));
+        assert_eq!(out.matches("status:").count(), 1, "must upsert, not duplicate");
+        assert!(out.contains("Body line one\nBody line two"), "body preserved");
+    }
+
+    #[test]
+    fn set_frontmatter_inserts_a_new_key_inside_the_fence() {
+        let out = set_frontmatter(FM_DOC, "priority", "today");
+        let closing_fence = out.match_indices("---").nth(1).expect("closing fence").0;
+        let new_key = out.find("priority: today").expect("new key present");
+        assert!(new_key < closing_fence, "new key must land inside the frontmatter fence");
+        assert!(out.contains("Body line one"), "body preserved");
+    }
+
+    #[test]
+    fn set_frontmatter_without_frontmatter_returns_input_unchanged() {
+        let plain = "no frontmatter here\njust body\n";
+        assert_eq!(set_frontmatter(plain, "status", "draft"), plain);
+    }
+
+    #[test]
+    fn remove_frontmatter_drops_the_key_and_keeps_the_rest() {
+        let out = remove_frontmatter(FM_DOC, "status");
+        assert!(!out.contains("status:"), "removed key gone");
+        assert!(out.contains("title: Note"), "other keys survive");
+        assert!(out.contains("Body line one"), "body preserved");
+    }
+
+    #[test]
+    fn remove_frontmatter_absent_key_is_a_no_op() {
+        assert_eq!(remove_frontmatter(FM_DOC, "nonexistent"), FM_DOC);
+    }
+
+    #[test]
+    fn remove_frontmatter_without_frontmatter_returns_input_unchanged() {
+        let plain = "plain body\nno fence\n";
+        assert_eq!(remove_frontmatter(plain, "status"), plain);
+    }
+
+    #[test]
+    fn column_tag_returns_the_column_when_present_and_none_otherwise() {
+        let with_col = "---\ntags: [today, project]\n---\nbody\n";
+        assert_eq!(column_tag(with_col), Some("today".to_string()));
+
+        let without_col = "---\ntags: [project, idea]\n---\nbody\n";
+        assert_eq!(column_tag(without_col), None);
+    }
+
+    #[test]
+    fn set_column_tag_swaps_the_column_and_keeps_other_tags() {
+        let doc = "---\ntags: [later, project]\n---\nbody\n";
+        let out = set_column_tag(doc, "today");
+        let tags = parse_tag_list(&frontmatter_value(&out, "tags").expect("tags present"));
+        assert_eq!(column_tag(&out), Some("today".to_string()), "new column active");
+        assert!(!tags.contains(&"later".to_string()), "previous column tag replaced");
+        assert!(tags.contains(&"project".to_string()), "non-column tag survives");
+    }
+
+    #[test]
+    fn parse_task_filters_out_done_and_rejected() {
+        let scratch = ScratchDir::new("parse_task_filter");
+        let dir = scratch.path();
+
+        let open_path = dir.join("open.md");
+        fs::write(&open_path, "---\ntitle: Open one\nstatus: open\n---\nbody\n").unwrap();
+        assert!(parse_task(&open_path).is_some(), "open task must parse");
+
+        let done_path = dir.join("done.md");
+        fs::write(&done_path, "---\ntitle: Done one\nstatus: done\n---\nbody\n").unwrap();
+        assert!(parse_task(&done_path).is_none(), "done task must be filtered out");
+
+        let rejected_path = dir.join("rejected.md");
+        fs::write(&rejected_path, "---\ntitle: Rejected one\nstatus: rejected\n---\nbody\n").unwrap();
+        assert!(parse_task(&rejected_path).is_none(), "rejected task must be filtered out");
     }
 }
 
@@ -891,30 +995,3 @@ pub fn save_triage_patterns(patterns: &[TriagePattern]) {
     }
 }
 
-pub fn suggest_columns(tasks: &[Task], patterns: &[TriagePattern]) -> Vec<(String, Option<(String, u32, u32)>)> {
-    let column_tags = ["today", "this-week", "later", "backlog"];
-    let untagged: Vec<&Task> = tasks.iter()
-        .filter(|t| t.status != STATUS_DONE && !t.is_pending())
-        .filter(|t| !column_tags.iter().any(|col| t.title.to_lowercase().contains(col)))
-        .collect();
-
-    untagged.iter().map(|task| {
-        let title_words: Vec<String> = task.title.to_lowercase()
-            .split(|c: char| !c.is_alphanumeric())
-            .filter(|w| w.len() > 2)
-            .map(|s| s.to_string())
-            .collect();
-
-        let suggestion = patterns.iter()
-            .filter(|p| p.hits >= 3 && (p.misses as f32 / (p.hits + p.misses) as f32) < 0.3)
-            .find(|p| {
-                let source_match = task.file_name().to_lowercase().contains(&p.source) ||
-                    task.title.to_lowercase().contains(&p.source);
-                let keyword_match = p.keywords.iter().any(|kw| title_words.contains(&kw.to_lowercase()));
-                source_match && keyword_match
-            })
-            .map(|p| (p.column.clone(), p.hits, p.hits + p.misses));
-
-        (task.title.clone(), suggestion)
-    }).collect()
-}

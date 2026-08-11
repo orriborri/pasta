@@ -29,3 +29,15 @@ The backend has two separate fetcher systems calling the same external APIs (Sla
 - `crates/common/src/config.rs` — `kb-sync` schedule default removed
 - `crates/backend/src/scheduler.rs` — `kb-sync` entry removed from REGISTRY
 - Config files: users with `[schedules.kb-sync]` in config.toml get a harmless ignored entry
+
+## Archival Note (2026-08-05)
+
+Reconciled and archived without ever having been moved out of `openspec/changes/` despite being fully implemented. Verified via static code review (no chat/runtime access to re-run the daemon):
+
+- `crates/backend/src/fetchers/` contains only `mod.rs` and `vault_manager.rs` — the five bespoke fetcher files are gone.
+- `crates/common/src/data.rs`'s `KNOWN_NATIVE_SCHEDULES` has no `"kb-sync"` entry.
+- No `kb-sync`/`kb_sync` string appears anywhere in `scheduler.rs` or `config.rs`.
+- `crates/backend/Cargo.toml` depends on `kb-sync`.
+- `fetch_cycle.rs` calls `kb_sync::fetch`/`write_feeds`/`index` exactly as designed here.
+
+Tasks 5.3 and 5.4 in `tasks.md` (live TUI/`.feeds/` smoke tests) were not re-exercised during this reconciliation and are left unchecked rather than assumed.

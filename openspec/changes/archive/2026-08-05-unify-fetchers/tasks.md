@@ -27,5 +27,5 @@
 
 - [x] 5.1 `cargo check` — verify full workspace compiles
 - [x] 5.2 Run `kb sync` CLI manually to confirm it still works via the shared crate
-- [ ] 5.3 Start backend, verify TUI schedule tab shows fetch cycle running without kb-sync row
-- [ ] 5.4 Verify `.feeds/` files are populated after a fetch cycle completes
+- [ ] 5.3 Start backend, verify TUI schedule tab shows fetch cycle running without kb-sync row — not re-exercised during 2026-08-05 reconciliation
+- [ ] 5.4 Verify `.feeds/` files are populated after a fetch cycle completes — not re-exercised during 2026-08-05 reconciliation

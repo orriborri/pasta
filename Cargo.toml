@@ -2,9 +2,6 @@
 members = [
     "crates/common",
     "crates/backend",
-    "crates/tui",
-    "crates/search",
-    "crates/mcp",
     "crates/kb-core",
     "crates/kb-storage",
     "crates/kb-pipeline",
@@ -14,6 +11,9 @@ members = [
     "crates/kb-mcp",
 ]
 resolver = "2"
+
+[workspace.package]
+edition = "2021"
 
 # Dev-profile build-speed tuning. Full DWARF debuginfo made pasta-backend a
 # ~1.4GB debug binary, and linking that dominated every Ralph build/test phase.

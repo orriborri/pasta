@@ -10,3 +10,5 @@ The backend `Command::Search` and `vault_manager` semantic-routing search SHALL 
 #### Scenario: Backend search after history index removal
 - **WHEN** `Command::Search` runs after the `history/indexer` module is removed
 - **THEN** it returns results from kb-engine's `~/.kb` store with filters applied pre-limit
+
+> Not promoted to `openspec/specs/search-filtering/spec.md` on archival — see Archival Note in `proposal.md`. `.kiro/specs/remove-accreted-architecture` task 5 owns rewriting that file and will fold in this delta (it removes the same `crates/mcp` reference this delta describes as already gone).

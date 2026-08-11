@@ -190,3 +190,181 @@ fn parse_notification(msg: &serde_json::Value) -> Option<Event> {
 
     None
 }
+
+#[cfg(test)]
+mod parser_tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_notification_kiro_session_update_agent_message_chunk() {
+        let msg = serde_json::json!({
+            "method": "session/update",
+            "params": {
+                "update": {
+                    "sessionUpdate": "agent_message_chunk",
+                    "content": { "text": "Hello world" }
+                }
+            }
+        });
+        
+        let result = parse_notification(&msg);
+        assert!(result.is_some(), "Notification should be parsed");
+    }
+
+    #[test]
+    fn test_parse_notification_kiro_session_update_tool_call() {
+        let msg = serde_json::json!({
+            "method": "session/update",
+            "params": {
+                "update": {
+                    "sessionUpdate": "tool_call",
+                    "name": "read_text_file",
+                    "status": "running"
+                }
+            }
+        });
+        
+        let result = parse_notification(&msg);
+        assert!(result.is_some(), "Tool call notification should be parsed");
+    }
+
+    #[test]
+    fn test_parse_notification_kiro_session_update_tool_result() {
+        let msg = serde_json::json!({
+            "method": "session/update",
+            "params": {
+                "update": {
+                    "sessionUpdate": "tool_result",
+                    "name": "read_text_file"
+                }
+            }
+        });
+        
+        let result = parse_notification(&msg);
+        assert!(result.is_some(), "Tool result notification should be parsed");
+    }
+
+    #[test]
+    fn test_parse_notification_kiro_session_update_turn_end() {
+        let msg = serde_json::json!({
+            "method": "session/update",
+            "params": {
+                "update": {
+                    "sessionUpdate": "turn_end"
+                }
+            }
+        });
+        
+        let result = parse_notification(&msg);
+        assert!(result.is_some(), "Turn end notification should be parsed");
+    }
+
+    #[test]
+    fn test_parse_notification_legacy_session_notification_agent_message_chunk() {
+        let msg = serde_json::json!({
+            "method": "session/notification",
+            "params": {
+                "type": "AgentMessageChunk",
+                "content": { "text": "Hello world" }
+            }
+        });
+        
+        let result = parse_notification(&msg);
+        assert!(result.is_some(), "Legacy notification should be parsed");
+    }
+
+    #[test]
+    fn test_parse_notification_legacy_session_notification_tool_call() {
+        let msg = serde_json::json!({
+            "method": "session/notification",
+            "params": {
+                "type": "ToolCall",
+                "name": "read_text_file",
+                "status": "running"
+            }
+        });
+        
+        let result = parse_notification(&msg);
+        assert!(result.is_some(), "Legacy tool call notification should be parsed");
+    }
+
+    #[test]
+    fn test_parse_notification_legacy_session_notification_tool_use() {
+        let msg = serde_json::json!({
+            "method": "session/notification",
+            "params": {
+                "type": "ToolUse",
+                "toolName": "read_text_file",
+                "status": "running"
+            }
+        });
+        
+        let result = parse_notification(&msg);
+        assert!(result.is_some(), "Legacy tool notification with toolName should be parsed");
+    }
+
+    #[test]
+    fn test_parse_notification_legacy_session_notification_turn_end() {
+        let msg = serde_json::json!({
+            "method": "session/notification",
+            "params": {
+                "type": "TurnEnd"
+            }
+        });
+        
+        let result = parse_notification(&msg);
+        assert!(result.is_some(), "Legacy turn end notification should be parsed");
+    }
+
+    #[test]
+    fn test_parse_notification_unknown_session_update_type() {
+        let msg = serde_json::json!({
+            "method": "session/update",
+            "params": {
+                "update": {
+                    "sessionUpdate": "unknown_type"
+                }
+            }
+        });
+        
+        let result = parse_notification(&msg);
+        assert!(result.is_none(), "Unknown session/update types should return None");
+    }
+
+    #[test]
+    fn test_parse_notification_unknown_session_notification_type() {
+        let msg = serde_json::json!({
+            "method": "session/notification",
+            "params": {
+                "type": "UnknownType"
+            }
+        });
+        
+        let result = parse_notification(&msg);
+        assert!(result.is_none(), "Unknown session/notification types should return None");
+    }
+
+    #[test]
+    fn test_parse_notification_missing_method() {
+        let msg = serde_json::json!({
+            "params": {
+                "update": {
+                    "sessionUpdate": "agent_message_chunk"
+                }
+            }
+        });
+        
+        let result = parse_notification(&msg);
+        assert!(result.is_none(), "Messages without method should return None");
+    }
+
+    #[test]
+    fn test_parse_notification_missing_params() {
+        let msg = serde_json::json!({
+            "method": "session/update"
+        });
+        
+        let result = parse_notification(&msg);
+        assert!(result.is_none(), "Messages without params should return None");
+    }
+}
