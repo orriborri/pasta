@@ -93,7 +93,6 @@ mod kb_config_tests {
 pub struct AppConfig {
     pub general: GeneralConfig,
     pub schedules: HashMap<String, NativeScheduleEntry>,
-    pub agents: Vec<AgentEntry>,
     pub repos: Vec<RepoEntry>,
     pub binaries: BinaryConfig,
     pub gog: GogConfig,
@@ -105,7 +104,6 @@ pub struct AppConfig {
 #[serde(default)]
 pub struct GeneralConfig {
     pub vault_path: String,
-    pub agent_timeout_minutes: u64,
     pub log_level: String,
 }
 
@@ -114,18 +112,6 @@ pub struct GeneralConfig {
 pub struct NativeScheduleEntry {
     pub interval_minutes: u64,
     pub enabled: bool,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct AgentEntry {
-    pub name: String,
-    pub prompt: String,
-    #[serde(default)]
-    pub interval_minutes: u64,
-    #[serde(default)]
-    pub cwd: Option<String>,
-    #[serde(default)]
-    pub depends_on: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -202,7 +188,6 @@ impl Default for AppConfig {
         Self {
             general: GeneralConfig::default(),
             schedules,
-            agents: vec![],
             repos: vec![],
             binaries: BinaryConfig::default(),
             gog: GogConfig::default(),
@@ -216,7 +201,6 @@ impl Default for GeneralConfig {
     fn default() -> Self {
         Self {
             vault_path: dirs::home_dir().unwrap().join("Obsidian/Readpeak").to_string_lossy().to_string(),
-            agent_timeout_minutes: 10,
             log_level: "info".to_string(),
         }
     }
@@ -290,19 +274,6 @@ enabled = true
 [schedules.trello]
 interval_minutes = 10
 enabled = true
-
-# Agentic schedules. Use depends_on for chaining, or interval_minutes for periodic.
-[[agents]]
-name = "inbox-processor"
-prompt = "Process inbox and feeds into the vault."
-cwd = "/home/orre/Obsidian/Readpeak"
-depends_on = ["gitlab-fetcher", "gmail-fetcher", "slack-fetcher", "linear-fetcher"]
-
-[[agents]]
-name = "daily-writer"
-prompt = "Create or update today's daily note."
-cwd = "/home/orre/Obsidian/Readpeak"
-depends_on = ["inbox-processor"]
 
 # Repos to index. Treesitter extracts symbols (functions, classes, types) from
 # matching files — full file contents are not copied, only structural summaries.
