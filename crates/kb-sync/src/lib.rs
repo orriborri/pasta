@@ -54,7 +54,12 @@ pub async fn fetch_with_lookback(sources: &[&str], lookback_days: i64) -> Result
                 let vault_path = &pasta_common::config::get().general.vault_path;
                 kb_fetchers::vault::VaultFetcher::new(vault_path).fetch()
             }
-            "calendar" => kb_fetchers::calendar::CalendarFetcher::new().fetch(&state).await,
+            "calendar" => {
+                let cal_ids = pasta_common::config::get().gog.calendar_ids.clone();
+                kb_fetchers::calendar::CalendarFetcher::new()
+                    .with_calendar_ids(cal_ids)
+                    .fetch(&state).await
+            }
             "gdocs" => kb_fetchers::gdocs::GdocsFetcher::new().fetch(&state).await,
             _ => continue,
         };

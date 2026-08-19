@@ -6,6 +6,9 @@ use tracing::info;
 
 pub struct CalendarFetcher {
     lookback_days: i64,
+    /// When non-empty, fetch only from these calendar IDs (passed as
+    /// `--calendar <id>` flags). When empty, passes `--all`.
+    calendar_ids: Vec<String>,
 }
 
 impl Default for CalendarFetcher {
@@ -17,7 +20,14 @@ impl Default for CalendarFetcher {
 impl CalendarFetcher {
     #[must_use]
     pub const fn new() -> Self {
-        Self { lookback_days: 30 }
+        Self { lookback_days: 30, calendar_ids: vec![] }
+    }
+
+    /// Create a fetcher scoped to specific calendar IDs.
+    #[must_use]
+    pub fn with_calendar_ids(mut self, ids: Vec<String>) -> Self {
+        self.calendar_ids = ids;
+        self
     }
 
     /// Fetch calendar events since last cursor.
@@ -31,8 +41,28 @@ impl CalendarFetcher {
                 d.to_rfc3339()
             });
 
+        let mut args = vec!["calendar", "events", "--json", "--max", "200", "--from"];
+        let since_owned = since.clone();
+        args.push(&since_owned);
+
+        // Build owned --calendar args or fall back to --all
+        let calendar_args: Vec<String> = if self.calendar_ids.is_empty() {
+            // Fetch from all calendars; deduplicate below.
+            args.push("--all");
+            vec![]
+        } else {
+            self.calendar_ids.iter()
+                .flat_map(|id| vec!["--calendars".to_string(), id.clone()])
+                .collect()
+        };
+
+        let mut cmd_args: Vec<&str> = args;
+        for arg in &calendar_args {
+            cmd_args.push(arg.as_str());
+        }
+
         let output = tokio::process::Command::new("gog")
-            .args(["calendar", "events", "--json", "--all", "--max", "200", "--from", &since])
+            .args(&cmd_args)
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .output()
@@ -54,11 +84,15 @@ impl CalendarFetcher {
     }
 }
 
-/// Parse `gog calendar events --json` output into records, dropping cancelled events.
+/// Parse `gog calendar events --json` output into records, dropping cancelled
+/// events and deduplicating by event ID (the same event appears once per
+/// subscribed calendar when `--all` is used).
 fn parse_records(json: &str) -> Vec<Record> {
     let resp: GogResponse = serde_json::from_str(json).unwrap_or(GogResponse { events: vec![] });
+    let mut seen = std::collections::HashSet::new();
     resp.events.iter()
         .filter(|e| e.status.as_deref() != Some("cancelled"))
+        .filter(|e| seen.insert(e.id.clone()))
         .map(event_to_record)
         .collect()
 }

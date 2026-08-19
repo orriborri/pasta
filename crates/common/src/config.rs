@@ -152,6 +152,10 @@ pub struct GogConfig {
     pub keyring_backend: String,
     pub keyring_password: String,
     pub home: String,
+    /// Calendar IDs to fetch events from. When empty, fetches from all
+    /// calendars (`--all`). Set to e.g. `["oscar.henriksson@readpeak.com"]`
+    /// to exclude delegated/subscribed calendars.
+    pub calendar_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -233,6 +237,7 @@ impl Default for GogConfig {
             keyring_backend: "file".to_string(),
             keyring_password: "pasta-gog-keyring".to_string(),
             home: dirs::home_dir().unwrap().join(".kiro/gog").to_string_lossy().to_string(),
+            calendar_ids: vec![],
         }
     }
 }
