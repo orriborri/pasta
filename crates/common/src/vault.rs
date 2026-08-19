@@ -139,12 +139,6 @@ impl VaultLayout {
         self.archive().join("Tasks-Stale")
     }
 
-    /// Path to weekly meetings directory (0. Inbox/Weekly Meetings/)
-    #[must_use]
-    pub fn weekly_meetings(&self) -> std::path::PathBuf {
-        self.inbox().join("Weekly Meetings")
-    }
-
     /// Path to timetracking directory (0. Inbox/Timetracking/)
     #[must_use]
     pub fn timetracking(&self) -> std::path::PathBuf {

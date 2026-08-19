@@ -56,7 +56,6 @@ async fn main() -> anyhow::Result<()> {
 
     if has("--organize") { return cli::organize().await; }
     if has("--daily") { return cli::daily().await; }
-    if has("--weekly") { return cli::weekly().await; }
     if has("--fetch") {
         fetch_cycle::run(None).await;
         eprintln!("  ✓ Fetch cycle complete");

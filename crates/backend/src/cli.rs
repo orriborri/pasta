@@ -20,11 +20,6 @@ pub async fn daily() -> anyhow::Result<()> {
     Ok(())
 }
 
-pub async fn weekly() -> anyhow::Result<()> {
-    crate::vault_organize::generate_weekly().await?;
-    Ok(())
-}
-
 pub async fn route_tasks() -> anyhow::Result<()> {
     // Auto-create initiative files + subfolders from Roadmap/ if missing in Tasks/
     let vault = pasta_common::vault::vault_path();

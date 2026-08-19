@@ -3,7 +3,7 @@
 //! kb-engine hybrid search, and the daily feed reads recent kb records.
 
 use anyhow::Result;
-use chrono::{Datelike, Local, TimeZone};
+use chrono::{Local, TimeZone};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -207,144 +207,7 @@ pub async fn generate_daily() -> Result<()> {
     Ok(())
 }
 
-/// Generate a weekly summary from git commits and archived/completed tasks.
-///
-/// Writes to `Meetings/Weekly/YYYY-MM-DD-summary.md`.
-///
-/// # Errors
-/// Returns an error if git commands fail or the file cannot be written.
-pub async fn generate_weekly() -> Result<()> {
-    let today = Local::now();
-    let week_start = today - chrono::Duration::days(today.weekday().num_days_from_monday() as i64);
-    let since = (week_start - chrono::Duration::days(7)).format("%Y-%m-%d").to_string();
-    let date_str = today.format("%Y-%m-%d").to_string();
-
-    let vault = Path::new(vault_path());
-    let layout = VaultLayout::new(vault);
-    let weekly_dir = layout.weekly_meetings();
-    fs::create_dir_all(&weekly_dir).ok();
-    let output_path = weekly_dir.join(format!("{date_str}-summary.md"));
-
-    let mut sections: Vec<String> = Vec::new();
-
-    // --- Git commits from configured repos ---
-    let repos = &pasta_common::config::get().repos;
-    let mut git_section = String::from("## Git Activity\n\n");
-    let mut has_git = false;
-
-    for repo in repos {
-        let repo_path = Path::new(&repo.path);
-        if !repo_path.exists() { continue; }
-
-        let output = std::process::Command::new("git")
-            .args(["log", "--author=oscar", "--since", &since, "--format=%ad | %s", "--date=short", "--no-merges"])
-            .current_dir(repo_path)
-            .output()
-            .ok();
-        let Some(output) = output else { continue; };
-        if !output.status.success() { continue; }
-
-        let log = String::from_utf8_lossy(&output.stdout);
-        let commits: Vec<&str> = log.lines()
-            .filter(|l| !l.contains("Synced task") && !l.contains("Merge task") && !l.contains("iteration 1"))
-            .collect();
-        if commits.is_empty() { continue; }
-
-        let repo_name = repo_path.file_name().unwrap_or_default().to_string_lossy();
-        git_section.push_str(&format!("### {}\n", repo_name));
-        for commit in &commits {
-            git_section.push_str(&format!("- {}\n", commit));
-        }
-        git_section.push('\n');
-        has_git = true;
-    }
-
-    if has_git {
-        sections.push(git_section);
-    }
-
-    // --- Completed/archived tasks this week ---
-    let archive_dir = layout.archive();
-    let stale_dir = layout.archive().join("Tasks-Stale");
-    let mut completed_section = String::from("## Completed Tasks\n\n");
-    let mut has_completed = false;
-
-    // Check tasks archived this week (by file modification time)
-    let cutoff = std::time::SystemTime::now() - std::time::Duration::from_secs(7 * 86400);
-    for dir in [&archive_dir, &stale_dir] {
-        let Ok(entries) = fs::read_dir(dir) else { continue; };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().is_none_or(|e| e != "md") { continue; }
-            let Ok(meta) = fs::metadata(&path) else { continue; };
-            let modified = meta.modified().ok();
-            if modified.is_none_or(|m| m < cutoff) { continue; }
-
-            let Ok(content) = fs::read_to_string(&path) else { continue; };
-            let title = frontmatter_value_from(&content, "title")
-                .unwrap_or_else(|| path.file_stem().unwrap_or_default().to_string_lossy().to_string());
-            completed_section.push_str(&format!("- {}\n", title));
-            has_completed = true;
-        }
-    }
-
-    if has_completed {
-        sections.push(completed_section);
-    }
-
-    // --- In-progress tasks ---
-    let tasks_dir = layout.tasks();
-    let mut in_progress_section = String::from("## In Progress\n\n");
-    let mut has_in_progress = false;
-
-    for entry in walk_task_files(&tasks_dir) {
-        let Ok(content) = fs::read_to_string(&entry) else { continue; };
-        if !content.contains("status: in-progress") && !content.contains("status: todo") { continue; }
-        if content.contains("stale: true") { continue; }
-
-        let title = frontmatter_value_from(&content, "title")
-            .unwrap_or_else(|| entry.file_stem().unwrap_or_default().to_string_lossy().to_string());
-        let status = if content.contains("status: in-progress") { "in-progress" } else { "todo" };
-        let priority = frontmatter_value_from(&content, "priority").unwrap_or_default();
-        let prio_str = if priority.is_empty() { String::new() } else { format!(" (P{})", priority) };
-        in_progress_section.push_str(&format!("- [{}] {}{}\n", status, title, prio_str));
-        has_in_progress = true;
-    }
-
-    if has_in_progress {
-        sections.push(in_progress_section);
-    }
-
-    // --- Assemble ---
-    let week_label = format!(
-        "Week {} — {} to {}",
-        today.iso_week().week(),
-        (today - chrono::Duration::days(today.weekday().num_days_from_monday() as i64)).format("%b %d"),
-        today.format("%b %d")
-    );
-
-    let body = format!(
-        "---\ntitle: \"Weekly Summary {date_str}\"\ndate: {date_str}\ntype: weekly\n---\n\n# {week_label}\n\n{}\n",
-        sections.join("\n")
-    );
-
-    fs::write(&output_path, &body).ok();
-    eprintln!("  ✓ Weekly summary written to Meetings/Weekly/{date_str}-summary.md");
-    tracing::info!(path = %output_path.display(), "weekly summary generated");
-    Ok(())
-}
-
-fn frontmatter_value_from(content: &str, key: &str) -> Option<String> {
-    let fm = content.strip_prefix("---")?.split_once("---")?.0;
-    let prefix = format!("{}:", key);
-    fm.lines()
-        .find(|l| l.starts_with(&prefix))
-        .map(|l| l[prefix.len()..].trim().trim_matches('"').to_string())
-}
-
-fn walk_task_files(dir: &Path) -> Vec<PathBuf> {
-    pasta_common::vault::walk_md_files(dir)
-}
+// generate_weekly retired (remove-embedded-agent-layer task 6): superseded by the KiroCrew weekly pipeline (vault -> status:ready -> Google Doc via gog).
 
 fn scan_para_docs(base: &Path) -> Vec<VaultDoc> {
     let layout = VaultLayout::new(base);
