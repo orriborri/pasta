@@ -1,4 +1,3 @@
-use pasta_common::data::Schedule;
 use pasta_common::ipc::{self, Command, Event};
 use pasta_common::vault;
 
@@ -61,10 +60,6 @@ async fn handle_client(stream: UnixStream, state: AppState) {
 }
 
 pub async fn build_state_snapshot(state: &AppState) -> Event {
-    let ps = state.process.lock().await;
-    let running_indices: Vec<usize> = ps.running.keys().copied().collect();
-    drop(ps);
-
     let sched = state.scheduler.lock().await;
     let config = &pasta_common::config::get().schedules;
     let native_schedules: Vec<ipc::NativeSchedule> = pasta_common::data::KNOWN_NATIVE_SCHEDULES.iter().map(|&name| {
@@ -75,24 +70,10 @@ pub async fn build_state_snapshot(state: &AppState) -> Event {
         let running = sched.running_native.contains(name) || (pasta_common::data::FETCH_GROUP_NAMES.contains(&name) && sched.running_native.contains("fetch-cycle"));
         ipc::NativeSchedule { name: name.to_string(), interval_minutes: interval, last_run, running }
     }).collect();
-    let agents_config = &pasta_common::config::get().agents;
-    let schedules: Vec<Schedule> = agents_config.iter().map(|a| {
-        let key = format!("agent:{}", a.name);
-        Schedule {
-            agent: a.name.clone(),
-            prompt: a.prompt.clone(),
-            interval_minutes: a.interval_minutes,
-            cwd: a.cwd.clone(),
-            last_run: sched.last_run.get(&key).copied(),
-            depends_on: a.depends_on.clone(),
-        }
-    }).collect();
     drop(sched);
 
     Event::State {
-        schedules,
         native_schedules,
-        running: running_indices,
         tasks: vault::load_tasks(),
         feeds: vault::load_feeds(),
         people: vault::load_people(),

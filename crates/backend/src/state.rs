@@ -9,17 +9,10 @@ use pasta_common::ipc::Event;
 pub type EventTx = mpsc::UnboundedSender<Event>;
 
 /// Shared daemon state. Each field is independently locked to reduce contention.
-/// Lock ordering: process → connection (never acquire connection while holding process).
 #[derive(Clone)]
 pub struct AppState {
-    pub process: Arc<Mutex<ProcessState>>,
     pub connection: Arc<Mutex<ConnectionState>>,
     pub scheduler: Arc<Mutex<SchedulerState>>,
-}
-
-pub struct ProcessState {
-    pub running: HashMap<usize, tokio::task::JoinHandle<()>>,
-    pub completed: HashSet<String>,
 }
 
 pub struct ConnectionState {
@@ -40,10 +33,6 @@ impl Default for AppState {
 impl AppState {
     pub fn new() -> Self {
         Self {
-            process: Arc::new(Mutex::new(ProcessState {
-                running: HashMap::new(),
-                completed: HashSet::new(),
-            })),
             connection: Arc::new(Mutex::new(ConnectionState {
                 event_tx: None,
             })),

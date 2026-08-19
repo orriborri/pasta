@@ -1,12 +1,10 @@
 use pasta_common::config;
-use pasta_common::ipc::Event;
 
 use chrono::Local;
 use std::future::Future;
 use std::pin::Pin;
 use tokio::time::{interval, Duration};
 
-use crate::process::{cleanup_finished, spawn_agent};
 use crate::state::AppState;
 use crate::util::log;
 
@@ -35,17 +33,11 @@ pub const FETCH_GROUP: &str = "fetch-cycle";
 
 fn run_fetch_cycle(state: AppState) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     Box::pin(async move {
-        let completed = {
-            let ps = state.process.lock().await;
-            ps.completed.clone()
-        };
         let event_tx = {
             let conn = state.connection.lock().await;
             conn.event_tx.clone()
         };
-        let new_completed = crate::fetch_cycle::run(completed, event_tx).await;
-        let mut ps = state.process.lock().await;
-        ps.completed = new_completed;
+        crate::fetch_cycle::run(event_tx).await;
     })
 }
 
@@ -73,7 +65,6 @@ pub fn spawn(state: AppState) {
         loop {
             ticker.tick().await;
             run_native_schedules(&state).await;
-            run_agentic_schedules(&state).await;
         }
     });
 }
@@ -136,68 +127,5 @@ async fn run_native_schedules(state: &AppState) {
     }
 }
 
-async fn run_agentic_schedules(state: &AppState) {
-    let now = Local::now();
 
-    cleanup_finished(state).await;
-    let agents = &config::get().agents;
 
-    // Collect spawn decisions under locks, then execute outside
-    struct SpawnDecision {
-        index: usize,
-        name: String,
-        prompt: String,
-        cwd: Option<String>,
-    }
-
-    let mut to_spawn: Vec<SpawnDecision> = Vec::new();
-
-    {
-        let mut sched_state = state.scheduler.lock().await;
-        let mut ps = state.process.lock().await;
-
-        for (i, agent) in agents.iter().enumerate() {
-            if ps.running.contains_key(&i) { continue; }
-
-            if !agent.depends_on.is_empty() {
-                let all_done = agent.depends_on.iter().all(|dep| ps.completed.contains(dep));
-                if all_done {
-                    log(&agent.name, &format!("triggered by deps: {:?}", agent.depends_on));
-                    sched_state.last_run.insert(format!("agent:{}", agent.name), now);
-                    for dep in &agent.depends_on { ps.completed.remove(dep); }
-                    to_spawn.push(SpawnDecision {
-                        index: i, name: agent.name.clone(), prompt: agent.prompt.clone(),
-                        cwd: agent.cwd.clone(),
-                    });
-                }
-                continue;
-            }
-
-            let key = format!("agent:{}", agent.name);
-            let should_run = if agent.interval_minutes == 0 { false } else {
-                sched_state.last_run.get(&key).is_none_or(|lr| (now - *lr).num_minutes() >= agent.interval_minutes as i64)
-            };
-            if should_run {
-                log(&agent.name, &format!("scheduled run: {}", agent.prompt.chars().take(60).collect::<String>()));
-                sched_state.last_run.insert(key, now);
-                to_spawn.push(SpawnDecision {
-                    index: i, name: agent.name.clone(), prompt: agent.prompt.clone(),
-                    cwd: agent.cwd.clone(),
-                });
-            }
-        }
-    } // locks dropped
-
-    // Execute spawns without holding scheduler lock
-    for decision in to_spawn {
-        if let Some(handle) = spawn_agent(&decision.name, &decision.prompt, decision.cwd.as_deref()) {
-            let mut ps = state.process.lock().await;
-            ps.running.insert(decision.index, handle);
-            drop(ps);
-            let conn = state.connection.lock().await;
-            if let Some(tx) = &conn.event_tx {
-                let _ = tx.send(Event::AgentStarted { index: decision.index, agent: decision.name });
-            }
-        }
-    }
-}

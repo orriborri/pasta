@@ -4,7 +4,6 @@ mod fetch_cycle;
 mod fetchers;
 mod kb_search;
 mod vault_organize;
-mod process;
 mod scheduler;
 mod server;
 mod trello;
@@ -59,8 +58,8 @@ async fn main() -> anyhow::Result<()> {
     if has("--daily") { return cli::daily().await; }
     if has("--weekly") { return cli::weekly().await; }
     if has("--fetch") {
-        let completed = fetch_cycle::run(std::collections::HashSet::new(), None).await;
-        eprintln!("  ✓ Fetch cycle complete ({} fetchers)", completed.len());
+        fetch_cycle::run(None).await;
+        eprintln!("  ✓ Fetch cycle complete");
         return Ok(());
     }
     if has("--route-tasks") { return cli::route_tasks().await; }
@@ -86,14 +85,9 @@ async fn main() -> anyhow::Result<()> {
     let state = AppState::new();
     scheduler::spawn(state.clone());
 
-    let shutdown_state = state.clone();
     tokio::spawn(async move {
         let _ = tokio::signal::ctrl_c().await;
         log("backend", "shutdown signal received");
-        let handles: Vec<_> = shutdown_state.process.lock().await.running.drain().map(|(_, h)| h).collect();
-        for h in &handles { h.abort(); }
-        let _ = tokio::time::timeout(tokio::time::Duration::from_secs(5),
-            futures::future::join_all(handles)).await;
         std::process::exit(0);
     });
 

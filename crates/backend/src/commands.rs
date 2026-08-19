@@ -1,7 +1,6 @@
 use pasta_common::ipc::{Command, Event};
 
 use crate::{fetch_cycle, server};
-use crate::process::spawn_agent;
 use crate::state::{AppState, EventTx};
 use crate::util::log;
 
@@ -10,26 +9,6 @@ pub async fn handle(cmd: Command, state: &AppState, tx: &EventTx) {
         Command::Sync => {
             let snapshot = server::build_state_snapshot(state).await;
             let _ = tx.send(snapshot);
-        }
-        Command::RunNow { index } => {
-            let agents = &pasta_common::config::get().agents;
-            if let Some(s) = agents.get(index) {
-                let ps = state.process.lock().await;
-                if ps.running.contains_key(&index) {
-                    let _ = tx.send(Event::Flash { message: format!("{} already running", s.name) });
-                    return;
-                }
-                drop(ps);
-                let agent = s.name.clone();
-                let prompt = s.prompt.clone();
-                let cwd = s.cwd.clone();
-                log(&agent, &format!("manual run: {}", prompt.chars().take(60).collect::<String>()));
-                if let Some(handle) = spawn_agent(&agent, &prompt, cwd.as_deref()) {
-                    state.process.lock().await.running.insert(index, handle);
-                    let _ = tx.send(Event::AgentStarted { index, agent: agent.clone() });
-                    let _ = tx.send(Event::Flash { message: format!("↻ {} triggered", agent) });
-                }
-            }
         }
         Command::RerunNative { name } => {
             let mut sched = state.scheduler.lock().await;
@@ -64,19 +43,11 @@ pub async fn handle(cmd: Command, state: &AppState, tx: &EventTx) {
             }
             log("native-fetchers", "force fetch triggered");
             tokio::spawn(async move {
-                let completed = {
-                    let ps = st.process.lock().await;
-                    ps.completed.clone()
-                };
                 let event_tx = {
                     let conn = st.connection.lock().await;
                     conn.event_tx.clone()
                 };
-                let new_completed = fetch_cycle::run(completed, event_tx).await;
-                {
-                    let mut ps = st.process.lock().await;
-                    ps.completed = new_completed;
-                }
+                fetch_cycle::run(event_tx).await;
                 {
                     let mut sched = st.scheduler.lock().await;
                     sched.running_native.remove("fetch-cycle");

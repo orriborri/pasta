@@ -1,4 +1,3 @@
-use crate::data::Schedule;
 use crate::vault::{Feed, Person, Task};
 use chrono::{DateTime, Local};
 use serde::{Deserialize, Serialize};
@@ -20,7 +19,6 @@ pub fn socket_path() -> PathBuf {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "cmd", rename_all = "snake_case")]
 pub enum Command {
-    RunNow { index: usize },
     RerunNative { name: String },
     ForceFetch,
     Backfill,
@@ -36,15 +34,11 @@ pub enum Command {
 #[serde(tag = "evt", rename_all = "snake_case")]
 pub enum Event {
     State {
-        schedules: Vec<Schedule>,
         native_schedules: Vec<NativeSchedule>,
-        running: Vec<usize>,
         tasks: Vec<Task>,
         feeds: Vec<Feed>,
         people: Vec<Person>,
     },
-    AgentStarted { index: usize, agent: String },
-    AgentFinished { index: usize, agent: String },
     FetchComplete,
     Flash { message: String },
     SearchResults { results: Vec<SearchResultItem> },

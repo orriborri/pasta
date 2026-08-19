@@ -131,34 +131,6 @@ async fn marker_cleared_after_completion_success() {
         Current implementation may not clean up properly.");
 }
 
-// Test 5: WHEN a fetch cycle completes
-// THEN the completed-fetcher set SHALL be merged rather than replaced wholesale
-//
-// This test verifies fetch_cycle::run merges, not replaces.
-#[tokio::test]
-async fn completed_set_merged_not_replaced() {
-    // fetch_cycle::run receives a completed set and must:
-    // 1. Add new fetchers to the existing set (union)
-    // 2. NOT discard the existing set
-    
-    let root = workspace_root();
-    let fetch_cycle_content = std::fs::read_to_string(
-        format!("{}/src/fetch_cycle.rs", root)
-    ).expect("Could not read fetch_cycle.rs");
-    
-    // The function receives 'mut completed' and inserts into it
-    // It must NOT create a new HashSet and return that (replacement)
-    // It must modify the input set (merge)
-    
-    let modifies_input = fetch_cycle_content.contains("completed.insert")
-        || fetch_cycle_content.contains("completed.extend");
-    
-    // This test SHOULD pass after the fix
-    assert!(modifies_input,
-        "fetch_cycle::run must merge completed set (insert into input), not replace it. \
-        Current implementation may be discarding the input completed set.");
-}
-
 // Unit test: Running native set behavior - verify HashSet operations
 #[test]
 fn running_native_set_behavior() {
