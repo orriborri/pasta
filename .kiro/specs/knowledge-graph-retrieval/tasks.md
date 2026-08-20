@@ -1,144 +1,217 @@
 # Implementation Plan
 
-This plan intentionally introduces the graph in phases. Do not start by wiring
-Graphify into production. Establish pasta's own stable domain/retrieval boundary
-first, then evaluate Graphify behind it.
+This plan intentionally improves pasta's architectural boundaries before adding
+new graph infrastructure. The first half should leave the system better even if
+the graph/Graphify experiment is later rejected.
 
-- [ ] 0. Establish baseline and capture current retrieval behaviour [prerequisite]
+The governing boundary is:
+
+> Fetchers observe. Pipeline interprets. Storage persists. KnowledgeService
+> answers. Pasta acts.
+
+- [ ] 0. Establish the baseline and dependency map [prerequisite]
   - Run `cargo build --workspace`, `cargo clippy --workspace -- -D warnings`, and `cargo test --workspace`
-  - Record a small fixture set of real queries and current `kb search` results/latency for later comparison
-  - Confirm Parquet remains the documented source of truth and identify every direct caller of `kb_storage::hybrid_search`
+  - Record representative `kb search` queries, results, and latency for later comparison
+  - Identify every caller of `kb_storage::hybrid_search`, `TextIndex`, `VectorStore`, and direct Parquet reads
+  - Map current side effects in `kb-sync::index`, including People/vault writes, discovery surfacing, storage writes, and embedding
+  - Record every current meaning of "entity": `Record.entities`, `EntityManager`, registry entries, and any other entity-like types
   - _Requirements: 4.1, 5.5, 10.6, 10.7_
 
-- [ ] 1. Add the entity domain model to `kb-core`
-  - Add `EntityId`, `Entity`, `EntityKind`, and `SourceRef` or reuse/extend the existing source-reference type where appropriate
-  - Implement deterministic namespaced ID helpers for Linear issues, GitHub repositories/PRs, vault objects, people, and code symbols
-  - Add serialization round-trip tests and collision/determinism tests
-  - Do not modify ingestion or search behaviour in this task
+- [ ] 1. Introduce `KnowledgeService` before adding graph behavior [architecture]
+  - Add a service/application boundary (`kb-service` crate or an equivalently explicit module after measuring whether a new crate is justified)
+  - Define storage-neutral `SearchQuery` and `KnowledgeResult` types
+  - Implement `KnowledgeService::search` by delegating to the current RRF hybrid search without changing ranking
+  - Route `kb-mcp`, `kb-cli`, and pasta backend search through `KnowledgeService`
+  - Remove direct Tantivy/LanceDB construction from MCP/application layers
+  - Add an architecture test/grep gate so new direct search-index access stays inside the knowledge infrastructure layer
+  - _Requirements: 4.1, 4.2, 4.5, 4.6, 10.2_
+
+- [ ] 2. Make retrieval failures observable instead of silently empty [reliability]
+  - Replace `unwrap_or_default` degradation in hybrid retrieval with explicit retriever status/error handling
+  - Introduce provider/retriever abstractions for lexical and semantic retrieval without changing their implementations
+  - Return successful partial results only when degradation is explicit and observable
+  - Include retriever health/status in diagnostics and make MCP capable of reporting degraded retrieval
+  - Preserve the existing RRF ranking as the baseline strategy
+  - _Requirements: 4.1, 4.4, 5.5, 10.2_
+
+- [ ] 3. Clarify the existing entity terminology before adding the graph model [deconfliction]
+  - Rename/refactor `kb_pipeline::entity_manager::EntityManager` to reflect its real role as a People/vault projector (for example `PeopleProjector`)
+  - Ensure this component does not become the canonical knowledge-entity store
+  - Document the responsibility of `EntityRegistry` and decide whether it is identity normalization, enrichment configuration, or another projection concern
+  - Inventory and document the current semantics of `Record.entities: Vec<String>`
+  - Do not add graph-domain `Entity` types until these names and responsibilities are unambiguous
+  - _Requirements: 1.1, 1.4, 7.1, 10.1_
+
+- [ ] 4. Replace overloaded record fields with structured source metadata [domain cleanup]
+  - Design a backward-compatible evolution of `Record` that separates common fields from source-specific metadata
+  - Stop relying on positional `tags` semantics such as Linear status/project encoded by vector position
+  - Introduce typed metadata for high-value sources first (Linear, GitHub/Git, Slack, Vault); migrate incrementally
+  - Introduce typed actor/source references where practical instead of overloading `author`, `participants`, and `thread_id`
+  - Preserve Parquet compatibility through an explicit schema/version migration plan
+  - Add serialization and compatibility fixtures for old and new record representations
+  - _Requirements: 1.3, 7.1, 7.2, 9.1, 10.1_
+
+- [ ] 5. Split pure pipeline interpretation from persistence and vault side effects [architecture]
+  - Refactor the pipeline to return a `ProcessedBatch` (or equivalent) rather than performing external writes inside interpretation stages
+  - `ProcessedBatch` should carry transformed records plus discoveries/entity candidates/other derived outputs needed downstream
+  - Move People-file updates and discovery surfacing behind explicit projectors executed by orchestration after the pure pipeline completes
+  - Keep Parquet, text-index, vector-index, and future graph writes outside pure transformation stages
+  - Add tests proving pipeline output is deterministic and does not mutate the vault/filesystem
+  - _Requirements: 7.1, 7.3, 7.4, 9.1, 10.2_
+
+- [ ] 6. Define ingestion/indexing sinks explicitly [architecture]
+  - Separate raw/canonical record persistence, lexical indexing, semantic indexing, graph projection, and vault projection into explicit sink/repository interfaces or clearly isolated functions
+  - Refactor `kb-sync::index` into orchestration over those components instead of implementing all behavior directly
+  - Define failure policy for each sink: authoritative-write failure vs derived-index degradation vs optional projection failure
+  - Ensure a failed optional projector cannot corrupt or suppress authoritative record persistence
+  - Add integration tests for partial failure behavior
+  - _Requirements: 7.3, 7.4, 9.1, 9.2, 10.2_
+
+- [ ] 7. Add the canonical entity domain model to `kb-core`
+  - Add `EntityId`, `Entity`, `EntityKind`, and `SourceRef` or reuse/extend an existing source-reference type
+  - Implement deterministic namespaced IDs for Linear issues, repositories/PRs, vault objects, people, and code symbols
+  - Keep cross-source objects separate by default; connect/alias them only with deterministic evidence
+  - Add serialization round-trip, determinism, and collision tests
+  - Do not make vault filenames the canonical identity mechanism
   - _Requirements: 1.1, 1.2, 1.3, 1.5, 10.1_
 
-- [ ] 2. Add relations and provenance to `kb-core`
-  - Add `Relation`, `RelationKind`, and provenance variants Explicit/Extracted/Inferred
-  - Require evidence references for Explicit/Extracted relations and evidence + model + confidence for Inferred relations
-  - Add tests for relation identity/deduplication keys and provenance serialization
+- [ ] 8. Add relation and universal provenance types to `kb-core`
+  - Add `Relation`, `RelationKind`, and Explicit/Extracted/Inferred provenance
+  - Require evidence references for explicit/extracted relations and evidence + model + confidence for inferred relations
+  - Define reusable retrieval evidence/reason types so provenance is available for search results as well as graph edges
+  - Add tests for relation identity/deduplication and provenance serialization
   - _Requirements: 2.1, 2.2, 2.3, 3.1, 3.2, 3.3, 3.4_
 
-- [ ] 3. Define `GraphRepository` without selecting a graph database
-  - Add a provider-neutral repository contract for entity upsert, relation upsert, entity lookup, bounded related traversal, and derived-data rebuild
-  - Define graph schema/version metadata
-  - Define invariants for duplicate edges and dangling edges
-  - Add an in-memory implementation for contract tests first
-  - _Requirements: 2.3, 2.4, 2.5, 9.1, 9.3_
-
-- [ ] 4. Implement the first persistent graph repository in `kb-storage`
-  - Measure expected entity/edge counts from the current corpus before choosing storage
-  - Prefer the smallest existing mechanism that satisfies the contract; SQLite tables are acceptable for the prototype, but keep graph data clearly separate from sync cursor/state tables
-  - Add indexes required for `from`, `to`, kind-filtered, and depth-1 traversal
-  - Record corpus size, traversal latency, rebuild time, and operational notes in `docs/` or the spec reconciliation notes
-  - _Requirements: 2.4, 2.5, 9.4, 9.5_
-
-- [ ] 5. Add graph rebuild support
-  - Extend reindex/rebuild plumbing so derived entities and relations can be regenerated without mutating Parquet
-  - Detect graph schema version mismatch and require/recommend rebuild
-  - Validate no dangling edges and no duplicate deterministic edges after rebuild
-  - Keep graph rebuild failure isolated from the authoritative raw corpus
-  - _Requirements: 9.1, 9.2, 9.3, 10.2_
-
-- [ ] 6. Introduce `KnowledgeService` as the retrieval boundary
-  - Define storage-neutral `SearchQuery`, `KnowledgeResult`, `RelatedQuery`, and `EntityContext` types
-  - Route existing hybrid search through `KnowledgeService::search` with unchanged RRF behaviour first
-  - Add `entity`, `related`, and `context` operations backed by `GraphRepository`
-  - Migrate pasta/backend, kb-cli, and kb-mcp callers away from direct storage-specific retrieval where practical
-  - Grep to ensure no new direct Tantivy/LanceDB query code appears outside `kb-storage`
-  - _Requirements: 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 10.2_
-
-- [ ] 7. Add a source-independent extraction contract
-  - Define an extractor interface that accepts canonical knowledge records and emits zero or more entities/relations
-  - Extraction failure for one record must log/report and leave raw persistence + text/vector indexing successful
-  - Keep source-specific API/network code inside fetchers, not graph storage
-  - Add a no-op/default extractor proving new sources remain searchable without graph support
+- [ ] 9. Add source-independent entity/relation extractor contracts
+  - Define deterministic extractor interfaces accepting canonical processed records and returning entities/relations
+  - Keep source API/network behavior in fetchers rather than extractors or graph storage
+  - Isolate extractor failure so raw persistence and fuzzy search remain usable
+  - Add a no-op/default extractor proving sources remain searchable without graph support
+  - Integrate extraction into `ProcessedBatch` rather than creating another side-effecting pipeline path
   - _Requirements: 1.4, 7.1, 7.2, 7.3, 7.4, 7.5_
 
-- [ ] 8. Implement deterministic Linear relationships
-  - Create Issue entities from stable Linear issue identifiers
-  - Create Project/team entities only where stable source metadata exists
-  - Emit explicit/extracted `belongs_to` or equivalent relations with source evidence
-  - Add fixtures proving repeated sync produces stable IDs and no duplicate edges
-  - _Requirements: 1.2, 2.3, 3.1, 3.2, 10.3_
+- [ ] 10. Define `GraphRepository` without choosing a graph database
+  - Add a provider-neutral contract for entity upsert, relation upsert, entity lookup, bounded traversal, and derived rebuild
+  - Define graph schema/version metadata plus duplicate-edge and dangling-edge invariants
+  - Add an in-memory implementation for contract tests
+  - Keep the contract in the knowledge/service boundary and storage implementation in `kb-storage`
+  - _Requirements: 2.3, 2.4, 2.5, 9.1, 9.3_
 
-- [ ] 9. Implement deterministic GitHub relationships
-  - Create Repository and PullRequest entities from stable GitHub identity
-  - Emit PullRequest → Repository relation
-  - Where a PR/body/metadata explicitly names a known issue key/link, emit an evidence-backed `implements` relation; do not infer from vague text in this phase
-  - Add tests for multiple repositories containing the same PR number
-  - _Requirements: 1.2, 2.2, 3.1, 3.2, 10.3_
+- [ ] 11. Implement the smallest persistent graph repository [measurement gate]
+  - Measure expected entity/edge counts and query patterns before selecting storage
+  - Prefer existing infrastructure such as dedicated SQLite graph tables if it meets measured needs
+  - Keep graph data clearly separate from sync cursor/state tables even when the same SQLite engine is used
+  - Add indexes for from/to/kind and depth-1 traversal
+  - Record corpus size, traversal latency, rebuild time, and operational complexity
+  - Do not introduce a dedicated graph database without evidence
+  - _Requirements: 2.4, 2.5, 9.4, 9.5_
 
-- [ ] 10. Implement deterministic Vault/task relationships
-  - Create Task/Project entities from stable vault paths/frontmatter using `VaultLayout`
-  - Emit task → project/initiative relations from explicit path/frontmatter information
-  - Ensure routed tasks keep stable identity when their authoritative identity can be preserved; document the chosen identity rule where moves necessarily change it
-  - Add subfolder fixtures matching the recursive task semantics from `remove-accreted-architecture`
-  - _Requirements: 1.2, 2.2, 3.1, 7.2, 10.3_
+- [ ] 12. Add deterministic high-value relationships
+  - Linear: Issue → Project/Team using stable explicit source metadata
+  - GitHub/Git provider data: PullRequest → Repository and explicit issue-link → `implements`
+  - Vault: Task → Project/Initiative from explicit path/frontmatter information
+  - People: Record/Message → Person from explicit normalized actor identity
+  - Add repeated-sync fixtures proving stable IDs and no duplicate deterministic edges
+  - Avoid broad LLM inference in this phase
+  - _Requirements: 1.2, 2.2, 3.1, 3.2, 7.2, 10.3_
 
-- [ ] 11. Add bounded graph-aware retrieval
-  - Identify entities associated with hybrid-search results and use them as graph seeds
-  - Default expansion depth to 1 with configurable hard fan-out/result limits
-  - Annotate every returned result with retrieval reason: lexical, semantic, direct relation, or graph path
-  - Preserve a hybrid-only mode/fallback
-  - Add tests proving cycles cannot cause unbounded traversal
-  - _Requirements: 5.1, 5.2, 5.3, 5.4_
+- [ ] 13. Add graph rebuild and derived-data validation
+  - Rebuild entities/relations from authoritative records and configured external deterministic providers
+  - Detect graph schema-version mismatches
+  - Validate dangling-edge and duplicate-edge invariants after rebuild
+  - Ensure rebuild never mutates Parquet authoritative data
+  - Keep inferred edges separately identifiable/versioned if inference is introduced later
+  - _Requirements: 9.1, 9.2, 9.3, 10.2_
 
-- [ ] 12. Build a retrieval evaluation fixture
-  - Use the baseline queries captured in task 0 plus relationship-heavy questions such as "what implemented issue X?", "what discussions relate to project Y?", and "what changed around component Z?"
-  - Compare hybrid-only vs hybrid-plus-graph result relevance and latency on the same corpus
-  - Record misses, harmful graph expansions, and useful expansions; tune limits/ranking only from evidence
-  - _Requirements: 5.5, 10.4_
+- [ ] 14. Evolve retrieval from one RRF function into explicit retrieval signals
+  - Keep current RRF as `RankingStrategy::Rrf` (or equivalent) baseline
+  - Represent lexical rank, semantic similarity, direct relation, graph path, and later recency as explicit retrieval signals
+  - Ensure direct deterministic relationships can outrank weak fuzzy matches when the query is relationship-oriented
+  - Attach retrieval reasons/evidence to returned results
+  - Keep ranking strategy independently testable and replaceable
+  - _Requirements: 4.3, 5.1, 5.2, 5.3, 5.5_
 
-- [ ] 13. Extend `kb-mcp` with entity-oriented tools
-  - Add `search_knowledge`, `get_entity`, `find_related`, and `get_context` (names may follow MCP naming conventions but semantics must match)
-  - Return clear not-found responses for unknown entity IDs
-  - Make provenance/evidence available in relation responses
-  - Route all tools through `KnowledgeService`
+- [ ] 15. Add bounded graph-aware context retrieval
+  - Extend `KnowledgeService` with `entity`, `related`, and `context`
+  - Identify seed entities from fuzzy results and allow bounded graph expansion
+  - Default graph depth to 1 with hard fan-out/result limits; require explicit request for deeper traversal initially
+  - Preserve hybrid-only fallback/mode
+  - Add cycle and high-degree-node tests proving traversal cannot explode
+  - _Requirements: 4.2, 4.3, 4.4, 5.1, 5.2, 5.3, 5.4_
+
+- [ ] 16. Make MCP agent-oriented and evidence-bearing
+  - Route every MCP operation through `KnowledgeService`
+  - Expose `search_knowledge`, `get_entity`, `find_related`, and `get_context` with storage-neutral schemas
+  - Include evidence/provenance and retrieval reasons where useful
+  - Return structured degraded-status information when a retriever/provider is unavailable
+  - Add clear unknown/not-found behavior
   - _Requirements: 3.5, 8.1, 8.2, 8.3, 8.4, 10.4_
 
-- [ ] 14. Add CLI diagnostics over the same service
-  - Add `kb entity`, `kb related`, and `kb context` only as thin diagnostic/user interfaces over `KnowledgeService`
-  - Do not duplicate graph traversal or ranking logic in `kb-cli`
-  - Keep existing `kb search` behaviour compatible
+- [ ] 17. Keep CLI as a thin diagnostic interface
+  - Route `kb search` through `KnowledgeService`
+  - Add `kb entity`, `kb related`, and `kb context` only as thin service clients
+  - Do not duplicate traversal/ranking logic in `kb-cli`
+  - Keep existing search UX compatible where practical
   - _Requirements: 8.5, 10.7_
 
-- [ ] 15. Define the `CodeGraphProvider` adapter
-  - Add provider-neutral repository indexing/import contract outside Graphify-specific code
-  - Define translation rules from provider nodes/edges to `CodeSymbol` entities and `calls`/`imports`/`implements` relations
-  - Add a disabled/no-provider implementation proving the rest of kb-engine works without a code graph
+- [ ] 18. Treat the Obsidian vault as a projection boundary [architecture]
+  - Identify remaining knowledge-layer code that writes directly into the vault
+  - Move People/discovery and similar derived writes behind explicit `VaultProjector`-style interfaces owned by pasta/application orchestration
+  - Keep task/PARA/workflow ownership in pasta while keeping knowledge identity independent from vault representation
+  - Define idempotency rules and tests for projections
+  - Record follow-up work for large remaining `vault_manager`/`vault_organize` responsibilities that should be split by capability
+  - _Requirements: 7.3, 7.4, 10.2_
+
+- [ ] 19. Clarify the pasta application crate boundary
+  - Document `backend` as application/daemon orchestration rather than knowledge implementation
+  - Evaluate renaming it to `pasta-daemon` or `pasta-app` in a separate low-risk change; do not mix a crate rename into graph implementation unless evidence shows it reduces migration risk
+  - Ensure scheduler, tasks, inbox, vault projection, Trello, and workflow coordination remain application responsibilities
+  - Ensure retrieval/index implementation lives behind knowledge-service contracts
+  - _Requirements: 4.5, 10.2, 10.7_
+
+- [ ] 20. Define `CodeGraphProvider` as an external knowledge-producer adapter
+  - Place the provider contract at the service/integration boundary, not inside graph storage
+  - Define repository indexing/import plus translation to canonical `CodeSymbol` entities and relations
+  - Add a disabled/no-provider implementation proving all non-code knowledge remains functional
+  - Ensure provider-native node/edge types never cross into `kb-core`
   - _Requirements: 6.1, 6.2, 6.3, 6.4_
 
-- [ ] 16. Build an optional Graphify proof of concept [experiment]
-  - Integrate Graphify only through `CodeGraphProvider`; do not expose its native types from `kb-core`
-  - Index the pasta repository and import code symbols/relations into the derived graph
-  - Treat Graphify absence/failure as degradation of code-structure enrichment, not failure of Slack/Gmail/Linear/Vault search
-  - Keep the existing Tree-sitter path intact during this task
+- [ ] 21. Build an optional Graphify proof of concept [experiment]
+  - Integrate Graphify only through `CodeGraphProvider`
+  - Index the pasta repository and translate its code symbols/edges into canonical entities/relations
+  - Treat Graphify absence/failure/staleness as code-structure degradation, not KB failure
+  - Keep the current Tree-sitter path intact during the experiment
   - _Requirements: 6.2, 6.3, 6.4, 6.7_
 
-- [ ] 17. Benchmark Graphify against the existing Tree-sitter path [decision gate]
-  - Run both against the same pasta revision/repositories
-  - Compare language/symbol coverage, call/import edge correctness, incremental latency, full rebuild time, real coding-query usefulness, operational complexity, and failure behaviour
-  - Record concrete examples of edges each provider gets right/wrong
+- [ ] 22. Benchmark Graphify against the existing Tree-sitter path [decision gate]
+  - Compare the same repository revision and coding questions
+  - Measure symbol/language coverage, call/import edge correctness, initial indexing, incremental update latency, query usefulness, operational complexity, and failure behavior
+  - Record concrete false-positive/false-negative examples from both providers
   - Write an explicit ADOPT GRAPHIFY or REJECT GRAPHIFY recommendation
-  - Do not remove Tree-sitter or make Graphify mandatory in this task
+  - Do not remove either provider during the benchmark task
   - _Requirements: 6.5, 6.6, 6.7, 10.5_
 
-- [ ] 18. Open the follow-up code-graph consolidation change
-  - If Graphify is adopted, specify deletion of overlapping Tree-sitter code-graph extraction and define Graphify freshness/rebuild operations
-  - If Graphify is rejected, specify which existing parser improvements are justified by the benchmark
-  - In either case, production must end with one authoritative provider for each deterministic code relationship
-  - _Requirements: 6.5, 6.6, 10.5_
+- [ ] 23. Build a retrieval-quality evaluation suite [decision gate]
+  - Reuse baseline queries from task 0 plus relationship-heavy questions such as `what implemented issue X?`, `what discussions relate to project Y?`, and `what changed around component Z?`
+  - Compare hybrid-only, graph-aware, and code-graph-assisted retrieval on the same corpus
+  - Measure relevance, latency, evidence quality, harmful expansion, and degraded-provider behavior
+  - Tune ranking/fan-out only from recorded evidence
+  - _Requirements: 5.5, 10.4, 10.5_
 
-- [ ] 19. Full-workspace and architecture gate
+- [ ] 24. Open follow-up consolidation changes
+  - If Graphify is adopted, specify deletion of overlapping Tree-sitter code-graph extraction and Graphify freshness/rebuild operations
+  - If Graphify is rejected, specify only parser improvements justified by the benchmark
+  - Review measured usage/benefit of Tantivy, LanceDB, Parquet full reads, and graph persistence before proposing any storage consolidation
+  - Production must end with one authoritative deterministic provider per code relationship
+  - _Requirements: 6.5, 6.6, 9.4, 9.5, 10.5_
+
+- [ ] 25. Full workspace and architecture gate
   - Run `cargo build --workspace`
   - Run `cargo clippy --workspace -- -D warnings`
   - Run `cargo test --workspace`
-  - Verify `kb search` still works without graph expansion and without Graphify installed
-  - Verify Parquet is still authoritative and graph data can be rebuilt
-  - Verify pasta/backend and MCP clients use the knowledge boundary rather than Graphify/Tantivy/LanceDB directly
+  - Verify `kb search` works with graph expansion disabled and Graphify absent
+  - Verify Parquet remains authoritative and every derived index/graph can be rebuilt
+  - Verify MCP/CLI/pasta use `KnowledgeService` rather than Tantivy/LanceDB/Graphify directly
+  - Verify pure pipeline tests perform no filesystem/vault writes
+  - Verify degraded retrieval/provider failures are observable rather than silently converted to empty results
   - _Requirements: 4.5, 6.2, 9.1, 10.6, 10.7_
