@@ -39,6 +39,8 @@ enum Cmd {
     },
     /// Rebuild `LanceDB` + Tantivy from Parquet (source of truth)
     Reindex,
+    /// Rebuild only the evidence graph (`graph.db`) from Parquet — no re-embedding
+    GraphRebuild,
     /// Re-run pipeline on all Parquet data and rebuild indexes
     Reprocess,
     /// Start HTTP API server
@@ -106,6 +108,7 @@ async fn main() -> Result<()> {
         Cmd::Search { query, limit } => cmd_search(&config, &query.join(" "), limit).await,
         Cmd::Recent { days, source } => cmd_recent(&config, days, source.as_deref()),
         Cmd::Reindex => cmd_reindex(&config).await,
+        Cmd::GraphRebuild => cmd_graph_rebuild(&config),
         Cmd::Reprocess => cmd_reprocess(&config).await,
         Cmd::Serve { port } => cmd_serve(&config, port).await,
         Cmd::Entity { entity, json } => cmd_entity(&config, &entity, json),
@@ -402,6 +405,27 @@ fn cmd_timeline(config: &KbConfig, entity: &str, limit: usize, json: bool) -> Re
             println!("{}  {} [{}] {}", e.at, e.record.record_id, e.record.source, e.record.title);
         }
     }
+    Ok(())
+}
+
+/// Rebuild the evidence graph (`graph.db`) from Parquet without touching the
+/// vector/text indexes or re-embedding. The graph is a derived index, so this is
+/// always safe to run.
+fn cmd_graph_rebuild(config: &KbConfig) -> Result<()> {
+    let parquet = ParquetStore::new(config);
+    let records = parquet.read_all()?;
+    info!(count = records.len(), "records read from parquet");
+    if records.is_empty() {
+        println!("No records in Parquet to build a graph from.");
+        return Ok(());
+    }
+    rebuild_graph(config, &records)?;
+    let graph = GraphStore::open(config)?;
+    println!(
+        "✓ Rebuilt evidence graph: {} entities, {} relations",
+        graph.entity_count()?,
+        graph.relation_count()?
+    );
     Ok(())
 }
 
