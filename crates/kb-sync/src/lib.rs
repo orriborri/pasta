@@ -145,6 +145,21 @@ pub async fn index(records: Vec<Record>) -> Result<usize> {
     let vector = VectorStore::new(&config);
     embed_and_upsert(&vector, &records).await?;
 
+    // Evidence graph (derived index): upsert relations for this batch. Best-effort
+    // — a failure here is logged and left for the next `kb reindex` to regenerate,
+    // matching how other derived-index write failures are tolerated.
+    match kb_storage::GraphStore::open(&config) {
+        Ok(graph) => {
+            let relations = kb_pipeline::relations_from_records(&records);
+            if let Err(e) = graph.upsert(&relations) {
+                tracing::warn!(error = %e, "graph upsert failed, will be rebuilt on next reindex");
+            } else {
+                info!(relations = relations.len(), "graph upserted");
+            }
+        }
+        Err(e) => tracing::warn!(error = %e, "graph open failed, skipping graph upsert"),
+    }
+
     Ok(records.len())
 }
 

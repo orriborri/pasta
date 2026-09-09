@@ -12,6 +12,7 @@ parquet = { workspace = true }
 lancedb = { workspace = true }
 lance-arrow = "7"
 tantivy = { workspace = true }
+rusqlite = { workspace = true }
 reqwest = { workspace = true }
 futures = { workspace = true }
 tracing = { workspace = true }
@@ -22,6 +23,8 @@ dirs = { workspace = true }
 [dev-dependencies]
 # Runtime for the `storage_evidence` example (async hybrid_search / lancedb).
 tokio = { workspace = true }
+# Integration tests derive relations to feed the graph store.
+kb-pipeline = { path = "../kb-pipeline" }
 
 [lints]
 workspace = true

@@ -2,7 +2,7 @@ use anyhow::Result;
 use axum::{Json, Router, extract::Query, routing::get};
 use clap::{Parser, Subcommand};
 use kb_core::{KbConfig, Record, SyncState};
-use kb_storage::{embedder, hybrid_search, ParquetStore, TextIndex, VectorStore};
+use kb_storage::{embedder, hybrid_search, GraphStore, ParquetStore, TextIndex, VectorStore};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use tracing::info;
@@ -46,6 +46,50 @@ enum Cmd {
         #[arg(short, long, default_value = "3030")]
         port: u16,
     },
+    /// Resolve an entity to a typed view (presence + relation degree)
+    Entity {
+        /// Canonical entity reference, e.g. "linear:AB-123"
+        entity: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// List the relations connected to an entity
+    Related {
+        /// Canonical entity reference
+        entity: String,
+        /// Relation kind filter, one of: `references`, `authored_by`, `participated_in`, `part_of_thread`, `mentions`, `linked_to`
+        #[arg(short, long)]
+        kind: Option<String>,
+        #[arg(short, long, default_value = "25")]
+        limit: usize,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Resolve evidence record ids to the underlying records
+    Evidence {
+        /// One or more record ids
+        record_ids: Vec<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show an entity context bundle (entity + relations + evidence)
+    Context {
+        /// Canonical entity reference
+        entity: String,
+        #[arg(short, long, default_value = "25")]
+        limit: usize,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show a time-ordered timeline of records touching an entity
+    Timeline {
+        /// Canonical entity reference
+        entity: String,
+        #[arg(short, long, default_value = "50")]
+        limit: usize,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[tokio::main]
@@ -64,6 +108,11 @@ async fn main() -> Result<()> {
         Cmd::Reindex => cmd_reindex(&config).await,
         Cmd::Reprocess => cmd_reprocess(&config).await,
         Cmd::Serve { port } => cmd_serve(&config, port).await,
+        Cmd::Entity { entity, json } => cmd_entity(&config, &entity, json),
+        Cmd::Related { entity, kind, limit, json } => cmd_related(&config, &entity, kind.as_deref(), limit, json),
+        Cmd::Evidence { record_ids, json } => cmd_evidence(&config, &record_ids, json),
+        Cmd::Context { entity, limit, json } => cmd_context(&config, &entity, limit, json),
+        Cmd::Timeline { entity, limit, json } => cmd_timeline(&config, &entity, limit, json),
     }
 }
 
@@ -85,6 +134,18 @@ async fn embed_and_upsert(vector: &VectorStore, records: &[Record]) -> Result<()
         vector.upsert(&ids, &contents, &sources, &titles, &created_ats, &urls, embeddings).await?;
         info!(batch = i + 1, total_batches = records.len().div_ceil(50), "embedded");
     }
+    Ok(())
+}
+
+/// Rebuild the evidence graph (`graph.db`) from records. Derives relations
+/// deterministically and fully rebuilds the derived index. Called by reindex and
+/// reprocess so the graph never diverges from Parquet.
+fn rebuild_graph(config: &KbConfig, records: &[Record]) -> Result<()> {
+    kb_storage::remove_graph_db(config)?;
+    let relations = kb_pipeline::relations_from_records(records);
+    let graph = GraphStore::open(config)?;
+    graph.rebuild(records, &relations)?;
+    info!(entities = graph.entity_count()?, relations = graph.relation_count()?, "graph rebuilt");
     Ok(())
 }
 
@@ -162,6 +223,9 @@ async fn cmd_reindex(config: &KbConfig) -> Result<()> {
     let vector = VectorStore::new(config);
     embed_and_upsert(&vector, &records).await?;
 
+    // Rebuild the evidence graph derived index from the same Parquet records.
+    rebuild_graph(config, &records)?;
+
     println!("✓ Reindexed {} records (model: {})", records.len(), embedder::model_name());
     Ok(())
 }
@@ -213,6 +277,9 @@ async fn cmd_reprocess(config: &KbConfig) -> Result<()> {
     let vector = VectorStore::new(config);
     embed_and_upsert(&vector, &records).await?;
 
+    // Rebuild the evidence graph derived index from the post-pipeline records.
+    rebuild_graph(config, &records)?;
+
     println!("✓ Reprocessed {} records through pipeline (model: {})", records.len(), embedder::model_name());
 
     Ok(())
@@ -241,6 +308,101 @@ struct SearchHit {
     content: String,
     created_at: String,
     score: f32,
+}
+
+/// Parse a canonical `EntityRef` from a CLI string argument.
+fn parse_entity(s: &str) -> Result<kb_core::EntityRef> {
+    s.parse::<kb_core::EntityRef>().map_err(|e| anyhow::anyhow!("{e}"))
+}
+
+fn cmd_entity(config: &KbConfig, entity: &str, json: bool) -> Result<()> {
+    let entity = parse_entity(entity)?;
+    let view = kb_query::get_entity(config, &entity)?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&view)?);
+    } else {
+        println!(
+            "{} (kind: {}) — present: {}, out: {}, in: {}",
+            view.entity, view.kind, view.present, view.out_degree, view.in_degree
+        );
+    }
+    Ok(())
+}
+
+fn cmd_related(config: &KbConfig, entity: &str, kind: Option<&str>, limit: usize, json: bool) -> Result<()> {
+    let entity = parse_entity(entity)?;
+    let kind_filter = match kind {
+        None => None,
+        Some(k) => Some(
+            kb_core::RelationKind::from_tag(k)
+                .ok_or_else(|| anyhow::anyhow!("unknown relation kind '{k}'"))?,
+        ),
+    };
+    let view = kb_query::get_related(config, &entity, kind_filter, limit)?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&view)?);
+    } else {
+        println!("{} — {} relation(s):", view.entity.entity, view.relations.len());
+        for r in &view.relations {
+            println!("  {} --{}--> {}  [evidence: {}, {}]", r.subject, r.predicate, r.object, r.evidence_record_id, r.derivation);
+        }
+    }
+    Ok(())
+}
+
+fn cmd_evidence(config: &KbConfig, record_ids: &[String], json: bool) -> Result<()> {
+    let ids: Vec<&str> = record_ids.iter().map(String::as_str).collect();
+    let views = kb_query::get_evidence(config, &ids)?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&views)?);
+    } else if views.is_empty() {
+        println!("No evidence records found.");
+    } else {
+        for e in &views {
+            println!("─── {} [{}] {} ───", e.record_id, e.source, e.created_at);
+            println!("{}", e.title);
+            if !e.snippet.trim().is_empty() {
+                println!("{}", e.snippet.trim());
+            }
+            println!();
+        }
+    }
+    Ok(())
+}
+
+fn cmd_context(config: &KbConfig, entity: &str, limit: usize, json: bool) -> Result<()> {
+    let entity = parse_entity(entity)?;
+    let ctx = kb_query::get_context(config, &entity, limit)?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&ctx)?);
+    } else {
+        println!(
+            "{} (present: {}) — {} relation(s), {} evidence record(s)",
+            ctx.entity.entity, ctx.entity.present, ctx.relations.len(), ctx.evidence.len()
+        );
+        for r in &ctx.relations {
+            println!("  {} --{}--> {}  [{}]", r.subject, r.predicate, r.object, r.evidence_record_id);
+        }
+        for e in &ctx.evidence {
+            println!("  evidence {} [{}]: {}", e.record_id, e.source, e.title);
+        }
+    }
+    Ok(())
+}
+
+fn cmd_timeline(config: &KbConfig, entity: &str, limit: usize, json: bool) -> Result<()> {
+    let entity = parse_entity(entity)?;
+    let entries = kb_query::get_timeline(config, &entity, limit)?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&entries)?);
+    } else if entries.is_empty() {
+        println!("No timeline entries.");
+    } else {
+        for e in &entries {
+            println!("{}  {} [{}] {}", e.at, e.record.record_id, e.record.source, e.record.title);
+        }
+    }
+    Ok(())
 }
 
 async fn cmd_serve(config: &KbConfig, port: u16) -> Result<()> {

@@ -20,4 +20,8 @@ impl KbConfig {
     pub fn vectors_dir(&self) -> PathBuf { self.data_dir.join("vectors") }
     #[must_use]
     pub fn index_dir(&self) -> PathBuf { self.data_dir.join("index") }
+    /// Path to the evidence graph derived index (`graph.db`), sibling to the
+    /// vector and text indexes. Safe to delete and rebuild from Parquet.
+    #[must_use]
+    pub fn graph_path(&self) -> PathBuf { self.data_dir.join("graph.db") }
 }

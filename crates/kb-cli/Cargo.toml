@@ -13,6 +13,7 @@ kb-storage = { path = "../kb-storage" }
 kb-pipeline = { path = "../kb-pipeline" }
 kb-fetchers = { path = "../kb-fetchers" }
 kb-sync = { path = "../kb-sync" }
+kb-query = { path = "../kb-query" }
 pasta-common = { path = "../common" }
 anyhow = { workspace = true }
 tokio = { workspace = true }

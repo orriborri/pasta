@@ -139,6 +139,20 @@ impl ParquetStore {
         }
         Ok(records)
     }
+
+    /// Read all records whose id is in the given set. Scans Parquet and filters.
+    /// Parquet is the source of truth for record bodies; this reuses the same
+    /// read machinery as `read_all` with an id filter.
+    ///
+    /// # Errors
+    /// Returns error if a Parquet file cannot be opened or parsed.
+    pub fn get_by_ids(&self, ids: &[&str]) -> Result<Vec<Record>> {
+        if ids.is_empty() {
+            return Ok(vec![]);
+        }
+        let want: std::collections::HashSet<&str> = ids.iter().copied().collect();
+        Ok(self.read_all()?.into_iter().filter(|r| want.contains(r.id.as_str())).collect())
+    }
 }
 
 const fn source_str(r: &Record) -> &'static str {

@@ -9,10 +9,13 @@ pub mod registry;
 pub mod enrich;
 pub mod entity_manager;
 pub mod discoveries;
+pub mod relation_extract;
 
 use anyhow::Result;
 use kb_core::Record;
 use tracing::info;
+
+pub use relation_extract::relations_from_records;
 
 /// Each pipeline stage processes a batch of records and returns the (possibly filtered/modified) batch.
 pub trait PipelineStage: Send + Sync {

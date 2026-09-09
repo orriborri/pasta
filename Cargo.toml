@@ -9,6 +9,7 @@ members = [
     "crates/kb-sync",
     "crates/kb-cli",
     "crates/kb-mcp",
+    "crates/kb-query",
 ]
 resolver = "2"
 
