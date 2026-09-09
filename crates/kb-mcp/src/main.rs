@@ -59,6 +59,16 @@ struct SearchResponse {
     hits: Vec<SearchHit>,
 }
 
+#[derive(Debug, serde::Serialize, schemars::JsonSchema)]
+struct EvidenceResponse {
+    records: Vec<EvidenceView>,
+}
+
+#[derive(Debug, serde::Serialize, schemars::JsonSchema)]
+struct TimelineResponse {
+    entries: Vec<TimelineEntry>,
+}
+
 fn parse_entity(s: &str) -> Result<EntityRef, ErrorData> {
     s.parse::<EntityRef>().map_err(|e| {
         ErrorData::invalid_params(format!("invalid entity reference '{s}': {e}"), None)
@@ -135,11 +145,11 @@ impl KbServer {
     async fn get_evidence(
         &self,
         Parameters(p): Parameters<EvidenceParams>,
-    ) -> Result<Json<Vec<EvidenceView>>, ErrorData> {
+    ) -> Result<Json<EvidenceResponse>, ErrorData> {
         let config = pasta_common::config::kb_config();
         let ids: Vec<&str> = p.record_ids.iter().map(String::as_str).collect();
-        let views = kb_query::get_evidence(&config, &ids).map_err(|e| query_err(&e))?;
-        Ok(Json(views))
+        let records = kb_query::get_evidence(&config, &ids).map_err(|e| query_err(&e))?;
+        Ok(Json(EvidenceResponse { records }))
     }
 
     #[tool(
@@ -162,12 +172,12 @@ impl KbServer {
     async fn get_timeline(
         &self,
         Parameters(p): Parameters<TimelineParams>,
-    ) -> Result<Json<Vec<TimelineEntry>>, ErrorData> {
+    ) -> Result<Json<TimelineResponse>, ErrorData> {
         let config = pasta_common::config::kb_config();
         let entity = parse_entity(&p.entity)?;
         let limit = p.limit.unwrap_or(50);
         let entries = kb_query::get_timeline(&config, &entity, limit).map_err(|e| query_err(&e))?;
-        Ok(Json(entries))
+        Ok(Json(TimelineResponse { entries }))
     }
 }
 
