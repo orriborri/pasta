@@ -3,9 +3,7 @@
 ## Purpose
 
 Columnar storage layer for kb-engine using Apache Parquet as the authoritative data store, with derived indexes (LanceDB, Tantivy) rebuildable from it.
-
 ## Requirements
-
 ### Requirement: Raw data stored as Parquet
 The system SHALL store all ingested records as Apache Parquet files, partitioned by source and month.
 
@@ -18,15 +16,19 @@ The system SHALL store all ingested records as Apache Parquet files, partitioned
 - **THEN** the system can replay the pipeline from Parquet without re-fetching from APIs
 
 ### Requirement: Parquet is source of truth, derived indexes rebuildable
-Parquet SHALL be authoritative. LanceDB (vectors) and Tantivy (full-text) are derived indexes fully rebuildable from Parquet.
+Parquet SHALL be authoritative. LanceDB (vectors), Tantivy (full-text), and the evidence graph (`graph.db`) are derived indexes fully rebuildable from Parquet.
 
 #### Scenario: Derived index corruption
-- **WHEN** the LanceDB or Tantivy index is corrupted or deleted
+- **WHEN** the LanceDB, Tantivy, or graph index is corrupted or deleted
 - **THEN** `kb reindex` rebuilds it from Parquet without re-fetching from any source API
 
 #### Scenario: Derived write fails during sync
 - **WHEN** a record is written to Parquet but the LanceDB upsert fails
 - **THEN** the record is preserved in Parquet, the error is logged, and it is re-indexed on the next reindex (no data loss)
+
+#### Scenario: Graph rebuilt during reindex
+- **WHEN** `kb reindex` runs
+- **THEN** it regenerates `graph.db` from the records read out of Parquet, deterministically, alongside the vector and text indexes
 
 ### Requirement: Records use stable IDs with replace-by-ID updates
 Each record SHALL have a deterministic ID derived from source and native identifier. Re-syncing a changed item replaces the existing record by ID across all stores.
@@ -56,3 +58,4 @@ The system SHALL support SQL queries over Parquet files using DataFusion for str
 #### Scenario: Count messages per person per week
 - **WHEN** user queries `SELECT author, COUNT(*) FROM records WHERE source='slack' GROUP BY author`
 - **THEN** DataFusion executes over Parquet and returns results
+
