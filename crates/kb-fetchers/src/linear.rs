@@ -7,6 +7,10 @@ use tracing::info;
 
 const DEFAULT_LINEAR_API: &str = "linear-api";
 
+const fn assigned_issues_query() -> &'static str {
+    r#"{ viewer { assignedIssues(first: 50, filter: { state: { type: { in: ["started", "unstarted"] } } }) { nodes { identifier title description updatedAt state { name } project { name } priority comments { nodes { body user { name } createdAt } } } } } }"#
+}
+
 pub struct LinearFetcher {
     binary: String,
 }
@@ -24,22 +28,18 @@ impl LinearFetcher {
         Self { binary: bin }
     }
 
-    /// Fetch Linear issues assigned to me, updated since last cursor.
+    /// Fetch the current snapshot of open Linear issues assigned to me.
+    ///
+    /// This intentionally does not use an incremental cursor: the same records
+    /// feed both the durable index and `.feeds/linear.md`, whose Open Issues
+    /// table must remain complete even when an issue has not changed recently.
+    /// The indexing layer already removes unchanged records by content hash.
     ///
     /// # Errors
     /// Returns error if the linear-api binary fails.
-    pub async fn fetch(&self, state: &SyncState) -> Result<Vec<Record>> {
-        let since = state.cursor("linear_forward")
-            .unwrap_or_else(|| {
-                (Utc::now() - chrono::Duration::days(30)).to_rfc3339()
-            });
-
-        let filter = format!(r#", filter: {{ updatedAt: {{ gte: "{since}" }} }}"#);
-        let issues = self.fetch_issues(&filter).await;
+    pub async fn fetch(&self, _state: &SyncState) -> Result<Vec<Record>> {
+        let issues = self.fetch_issues().await;
         info!(count = issues.len(), "linear issues fetched");
-
-        let now = Utc::now().to_rfc3339();
-        state.update_window("linear_forward", &since, &now).ok();
 
         let records = issues.into_iter().map(|issue| {
             let id = Record::make_id(Source::Linear, &issue.identifier);
@@ -80,12 +80,9 @@ impl LinearFetcher {
         Ok(records)
     }
 
-    async fn fetch_issues(&self, filter: &str) -> Vec<Issue> {
-        let query = format!(
-            r"{{ viewer {{ assignedIssues(first: 50{filter}) {{ nodes {{ identifier title description updatedAt state {{ name }} project {{ name }} priority comments {{ nodes {{ body user {{ name }} createdAt }} }} }} }} }} }}"
-        );
+    async fn fetch_issues(&self) -> Vec<Issue> {
         let output = tokio::process::Command::new(&self.binary)
-            .arg(&query)
+            .arg(assigned_issues_query())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .output()
@@ -130,3 +127,16 @@ struct CommentConn { nodes: Vec<Comment> }
 struct Comment { body: String, user: Option<CommentUser>, #[allow(dead_code)] #[serde(rename = "createdAt")] created_at: Option<String> }
 #[derive(Deserialize)]
 struct CommentUser { name: String }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn assigned_issues_query_fetches_current_open_snapshot_without_cursor() {
+        let query = assigned_issues_query();
+
+        assert!(query.contains(r#"type: { in: ["started", "unstarted"] }"#));
+        assert!(!query.contains("updatedAt: { gte:"));
+    }
+}
