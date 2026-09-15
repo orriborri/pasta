@@ -7,12 +7,12 @@ use crate::util::log;
 /// index into search stores, and generate the daily note. Called by both the
 /// scheduler and the ForceFetch command.
 pub async fn run(event_tx: Option<EventTx>) {
-    let sources = &["gmail", "linear", "calendar", "slack"];
+    let sources = &["gmail", "linear", "gitlab", "calendar", "slack"];
 
     // Fetch records using kb-fetchers (single pass) with timeout
-    let records = match tokio::time::timeout(
+    let outcome = match tokio::time::timeout(
         tokio::time::Duration::from_secs(300),
-        kb_sync::fetch(sources),
+        kb_sync::fetch_outcome(sources),
     ).await {
         Ok(Ok(r)) => r,
         Ok(Err(e)) => {
@@ -25,8 +25,14 @@ pub async fn run(event_tx: Option<EventTx>) {
         }
     };
 
-    // Write .feeds/ markdown BEFORE indexing (feeds update even if indexing fails)
-    kb_sync::write_feeds(&records);
+    // Write .feeds/ markdown BEFORE indexing (feeds update even if indexing fails).
+    // Only successful source snapshots are replaced; failed sources retain
+    // their last known-good feed.
+    if let Err(e) =
+        kb_sync::write_feeds_for_sources(&outcome.records, &outcome.successful_sources)
+    {
+        tracing::warn!("feed write failed: {e}");
+    }
 
     // Generate daily note
     if let Err(e) = crate::vault_organize::generate_daily().await {
@@ -34,7 +40,7 @@ pub async fn run(event_tx: Option<EventTx>) {
     }
 
     // Index into search stores (pipeline → Parquet/Tantivy/LanceDB)
-    match kb_sync::index(records).await {
+    match kb_sync::index(outcome.records).await {
         Ok(0) => log("kb-sync", "no new records"),
         Ok(n) => log("kb-sync", &format!("synced {n} records")),
         Err(e) => tracing::warn!("kb-sync indexing failed: {e}"),

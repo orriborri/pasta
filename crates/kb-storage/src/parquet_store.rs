@@ -160,6 +160,7 @@ const fn source_str(r: &Record) -> &'static str {
         kb_core::Source::Slack => "slack",
         kb_core::Source::Gmail => "gmail",
         kb_core::Source::Linear => "linear",
+        kb_core::Source::GitLab => "gitlab",
         kb_core::Source::Git => "git",
         kb_core::Source::Gdocs => "gdocs",
         kb_core::Source::Calendar => "calendar",
@@ -241,6 +242,7 @@ fn parse_source(s: &str) -> Source {
         "slack" => Source::Slack,
         "gmail" => Source::Gmail,
         "linear" => Source::Linear,
+        "gitlab" => Source::GitLab,
         "git" => Source::Git,
         "gdocs" => Source::Gdocs,
         "calendar" => Source::Calendar,
@@ -261,4 +263,33 @@ fn parse_kind(s: &str) -> Kind {
 
 fn parse_dt(s: &str) -> DateTime<Utc> {
     DateTime::parse_from_rfc3339(s).map_or_else(|_| Utc::now(), |dt| dt.with_timezone(&Utc))
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gitlab_source_string_round_trips() {
+        let now = Utc::now();
+        let record = Record {
+            id: "gitlab-mr-1-2".to_string(),
+            source: Source::GitLab,
+            kind: Kind::Issue,
+            title: String::new(),
+            content: String::new(),
+            author: String::new(),
+            participants: vec![],
+            created_at: now,
+            updated_at: now,
+            url: String::new(),
+            thread_id: String::new(),
+            entities: vec![],
+            tags: vec![],
+        };
+
+        assert_eq!(source_str(&record), "gitlab");
+        assert_eq!(parse_source(source_str(&record)), Source::GitLab);
+    }
 }

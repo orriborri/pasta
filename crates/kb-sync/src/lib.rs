@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use tracing::info;
 
 /// Sources that can be synced.
-pub const ALL_SOURCES: &[&str] = &["slack", "gmail", "linear", "git", "vault", "calendar", "gdocs"];
+pub const ALL_SOURCES: &[&str] = &["slack", "gmail", "linear", "gitlab", "git", "vault", "calendar", "gdocs"];
 
 /// Returns the feeds directory path using `VaultLayout`.
 /// This ensures the feeds directory is always relative to the configured vault path.
@@ -19,13 +19,27 @@ pub fn feeds_dir() -> PathBuf {
     VaultLayout::new(vault_path).feeds()
 }
 
+/// Fetch records plus the sources that completed successfully.
+pub struct FetchOutcome {
+    pub records: Vec<Record>,
+    pub successful_sources: Vec<String>,
+}
+
 /// Fetch records from specified sources. Does NOT index them.
 /// `lookback_days` controls how far back to go for channels without cursors (default: 1 for scheduled, 30 for backfill).
 ///
 /// # Errors
 /// Returns error if any fetcher fails critically.
 pub async fn fetch(sources: &[&str]) -> Result<Vec<Record>> {
-    fetch_with_lookback(sources, 1).await
+    Ok(fetch_outcome(sources).await?.records)
+}
+
+/// Fetch records and preserve which sources produced authoritative snapshots.
+///
+/// # Errors
+/// Returns error if shared fetch state cannot be opened.
+pub async fn fetch_outcome(sources: &[&str]) -> Result<FetchOutcome> {
+    fetch_outcome_with_lookback(sources, 1).await
 }
 
 /// Fetch with explicit lookback for first-time channels (used by backfill).
@@ -33,10 +47,18 @@ pub async fn fetch(sources: &[&str]) -> Result<Vec<Record>> {
 /// # Errors
 /// Returns error if any fetcher fails critically.
 pub async fn fetch_with_lookback(sources: &[&str], lookback_days: i64) -> Result<Vec<Record>> {
+    Ok(fetch_outcome_with_lookback(sources, lookback_days).await?.records)
+}
+
+async fn fetch_outcome_with_lookback(
+    sources: &[&str],
+    lookback_days: i64,
+) -> Result<FetchOutcome> {
     let config = pasta_common::config::kb_config();
     let state = SyncState::open(&config)?;
 
     let mut all_records: Vec<Record> = Vec::new();
+    let mut successful_sources = Vec::new();
 
     for src in sources {
         // Fetch each source independently. A single source failing (e.g. an
@@ -46,6 +68,7 @@ pub async fn fetch_with_lookback(sources: &[&str], lookback_days: i64) -> Result
             "slack" => kb_fetchers::slack::SlackFetcher::new().with_lookback_days(lookback_days).fetch(&state).await,
             "gmail" => kb_fetchers::gmail::GmailFetcher::new().fetch(&state).await,
             "linear" => kb_fetchers::linear::LinearFetcher::new().fetch(&state).await,
+            "gitlab" => kb_fetchers::gitlab::GitLabFetcher::new().fetch(&state).await,
             "git" => {
                 let repos = pasta_common::config::get().repos.iter().map(|r| r.path.clone()).collect();
                 kb_fetchers::git::GitFetcher::new(repos).fetch(&state)
@@ -65,6 +88,7 @@ pub async fn fetch_with_lookback(sources: &[&str], lookback_days: i64) -> Result
         };
         match result {
             Ok(records) => {
+                successful_sources.push((*src).to_string());
                 if !records.is_empty() {
                     info!(source = src, count = records.len(), "fetched");
                 }
@@ -76,7 +100,10 @@ pub async fn fetch_with_lookback(sources: &[&str], lookback_days: i64) -> Result
         }
     }
 
-    Ok(all_records)
+    Ok(FetchOutcome {
+        records: all_records,
+        successful_sources,
+    })
 }
 
 /// Index records through the pipeline and store them.
@@ -172,20 +199,49 @@ pub async fn run(sources: &[&str]) -> Result<usize> {
     index(records).await
 }
 
-/// Write `.feeds/` markdown files from fetched records, grouped by source.
-pub fn write_feeds(records: &[Record]) {
+/// Write all `.feeds/` markdown files from fetched records, grouped by source.
+///
+/// # Errors
+/// Returns an error if the feeds directory or a feed file cannot be written.
+pub fn write_feeds(records: &[Record]) -> Result<()> {
+    let sources = ["slack", "gmail", "linear", "gitlab", "calendar"]
+        .map(ToString::to_string);
+    write_feeds_for_sources(records, &sources)
+}
+
+/// Write feeds only for sources whose fetch completed successfully. This keeps
+/// a transient source failure from replacing its last good feed with a false
+/// empty snapshot.
+///
+/// # Errors
+/// Returns an error if the feeds directory or a feed file cannot be written.
+pub fn write_feeds_for_sources(
+    records: &[Record],
+    successful_sources: &[String],
+) -> Result<()> {
     let feeds_path = feeds_dir();
-    fs::create_dir_all(&feeds_path).ok();
+    fs::create_dir_all(&feeds_path)?;
     let now = Local::now().format("%Y-%m-%dT%H:%M");
 
-    for source in &[Source::Slack, Source::Gmail, Source::Linear, Source::Calendar] {
-        let source_records: Vec<&Record> = records.iter().filter(|r| r.source == *source).collect();
+    for source in feed_sources(successful_sources) {
+        let source_records: Vec<&Record> = records.iter().filter(|r| r.source == source).collect();
         let name = source.to_string();
-        let body = format_feed(&source_records, *source);
+        let body = format_feed(&source_records, source);
         let content = format!("---\nsource: {name}\nfetched: {now}\n---\n\n{body}");
         let path = feeds_path.join(format!("{name}.md"));
-        fs::write(path, content).ok();
+        fs::write(path, content)?;
     }
+    Ok(())
+}
+
+fn feed_sources(successful_sources: &[String]) -> Vec<Source> {
+    [Source::Slack, Source::Gmail, Source::Linear, Source::GitLab, Source::Calendar]
+        .into_iter()
+        .filter(|source| {
+            let name = source.to_string();
+            successful_sources.iter().any(|successful| successful == &name)
+        })
+        .collect()
 }
 
 fn format_feed(records: &[&Record], source: Source) -> String {
@@ -193,6 +249,7 @@ fn format_feed(records: &[&Record], source: Source) -> String {
         Source::Slack => format_slack_feed(records),
         Source::Gmail => format_gmail_feed(records),
         Source::Linear => format_linear_feed(records),
+        Source::GitLab => format_gitlab_feed(records),
         Source::Calendar => format_calendar_feed(records),
         _ => String::new(),
     }
@@ -289,6 +346,47 @@ fn format_linear_feed(records: &[&Record]) -> String {
             let _ = writeln!(body, "| {link} | {status} | {project} |");
         }
     }
+    body
+}
+
+fn format_gitlab_feed(records: &[&Record]) -> String {
+    const REVIEW_REQUEST: &str = "category:review-request";
+    const AUTHORED: &str = "category:authored";
+    const TODO: &str = "category:todo";
+
+    fn write_section(body: &mut String, heading: &str, empty: &str, records: &[&&Record]) {
+        let _ = writeln!(body, "## {heading}\n");
+        if records.is_empty() {
+            let _ = writeln!(body, "{empty}\n");
+            return;
+        }
+        for record in records {
+            if record.url.is_empty() {
+                let _ = writeln!(body, "- {}", record.title);
+            } else {
+                let _ = writeln!(body, "- [{}]({})", record.title, record.url);
+            }
+        }
+        body.push('\n');
+    }
+
+    let review_requests: Vec<&&Record> = records
+        .iter()
+        .filter(|record| record.tags.iter().any(|tag| tag == REVIEW_REQUEST))
+        .collect();
+    let authored: Vec<&&Record> = records
+        .iter()
+        .filter(|record| record.tags.iter().any(|tag| tag == AUTHORED))
+        .collect();
+    let todos: Vec<&&Record> = records
+        .iter()
+        .filter(|record| record.tags.iter().any(|tag| tag == TODO))
+        .collect();
+
+    let mut body = String::new();
+    write_section(&mut body, "Review Requested", "No reviews pending.", &review_requests);
+    write_section(&mut body, "My MRs", "No open merge requests.", &authored);
+    write_section(&mut body, "Todos / Mentions", "No pending todos.", &todos);
     body
 }
 
@@ -414,5 +512,51 @@ mod tests {
         
         // The path should end with .feeds
         assert!(feeds_path.to_string_lossy().ends_with("/.feeds"));
+    }
+
+    #[test]
+    fn failed_source_is_excluded_from_feed_rewrites() {
+        let successful = vec!["slack".to_string(), "linear".to_string()];
+
+        let sources = feed_sources(&successful);
+
+        assert!(sources.contains(&Source::Slack));
+        assert!(sources.contains(&Source::Linear));
+        assert!(!sources.contains(&Source::GitLab));
+    }
+
+    #[test]
+    fn gitlab_feed_groups_current_work_by_category() {
+        let now = chrono::Utc::now();
+        let record = |title: &str, url: &str, category: &str| Record {
+            id: Record::make_id(Source::GitLab, title),
+            source: Source::GitLab,
+            kind: kb_core::Kind::Issue,
+            title: title.to_string(),
+            content: String::new(),
+            author: String::new(),
+            participants: vec![],
+            created_at: now,
+            updated_at: now,
+            url: url.to_string(),
+            thread_id: String::new(),
+            entities: vec![],
+            tags: vec![category.to_string()],
+        };
+        let records = [
+            record("Review MR", "https://gitlab.example/review", "category:review-request"),
+            record("My MR", "https://gitlab.example/authored", "category:authored"),
+            record("Mention", "https://gitlab.example/todo", "category:todo"),
+        ];
+        let refs: Vec<&Record> = records.iter().collect();
+
+        let feed = format_gitlab_feed(&refs);
+
+        assert!(feed.contains("## Review Requested"));
+        assert!(feed.contains("[Review MR](https://gitlab.example/review)"));
+        assert!(feed.contains("## My MRs"));
+        assert!(feed.contains("[My MR](https://gitlab.example/authored)"));
+        assert!(feed.contains("## Todos / Mentions"));
+        assert!(feed.contains("[Mention](https://gitlab.example/todo)"));
     }
 }
