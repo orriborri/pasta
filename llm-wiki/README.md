@@ -12,6 +12,45 @@ The toolkit deliberately does **not** contain an LLM client, scheduler, or agent
 
 Generated wiki prose is context, not evidence. New factual claims must cite Pasta record IDs using `pasta:evidence:<record_id>`.
 
+## Personal agent skills
+
+The toolkit also includes two open Agent Skills:
+
+- `personal-agent` — retrieves prior personal context from Pasta and treats Pasta as the cross-session knowledge system.
+- `raw-inbox-memory` — externalizes durable user-provided information into `0. Inbox/Raw/` instead of relying on model/provider memory.
+
+Install both as personal skills for Claude Code and Codex:
+
+```bash
+bash llm-wiki/skills/install-personal-skills.sh --both
+```
+
+This installs the same skill bundles to `~/.claude/skills/` and `~/.codex/skills/`. Claude Code and Codex both support filesystem `SKILL.md` skills, so there is no provider-specific prompt fork.
+
+Raw capture flow:
+
+```text
+Claude / Codex / other agent
+          |
+          | exact user statement
+          v
+0. Inbox/Raw/*.md
+          |
+          | Pasta vault sync
+          v
+Pasta evidence
+          |
+          v
+LLM Wiki maintenance
+          |
+          v
+Knowledge/
+```
+
+Pasta deliberately indexes only the `0. Inbox/Raw/` subtree of the operational inbox. The compiled `Knowledge/` wiki remains excluded from evidence ingestion, preventing generated prose from becoming self-reinforcing evidence.
+
+The capture helper rejects obvious credential-like content by default and never silently claims persistence when a write fails.
+
 ## Incremental cycle
 
 ```text
