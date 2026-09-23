@@ -41,10 +41,10 @@ If information is sensitive but the user explicitly asks to preserve it, prefer 
 
 Preserve the user's wording. Do not rewrite a raw capture into a confident fact.
 
-Run:
+Resolve `scripts/capture.py` relative to the directory containing this `SKILL.md`, then run:
 
 ```bash
-python3 scripts/capture.py \
+python3 <skill-dir>/scripts/capture.py \
   --kind <fact|preference|decision|commitment|relationship|routine|note> \
   --source <runtime-name> \
   --text '<the user-provided statement verbatim>'
