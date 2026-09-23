@@ -2,7 +2,7 @@ use rmcp::handler::server::wrapper::{Json, Parameters};
 use rmcp::{schemars, tool, tool_router, transport::stdio, ErrorData, ServiceExt};
 
 use kb_core::{EntityRef, RelationKind};
-use kb_query::{ContextView, EntityView, EvidenceView, RelatedView, SearchHit, TimelineEntry};
+use kb_query::{ChangePage, ContextView, EntityView, EvidenceView, RelatedView, SearchHit, TimelineEntry};
 use kb_storage::embedder;
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -12,6 +12,16 @@ struct SearchKnowledgeParams {
     /// Filter by source: slack, gmail, linear, git, gdocs, calendar, vault
     source: Option<String>,
     /// Max results (default 10)
+    limit: Option<usize>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct ChangesParams {
+    /// Opaque cursor returned by a previous get_changes call. Omit to bootstrap.
+    cursor: Option<String>,
+    /// Filter by source: slack, gmail, linear, gitlab, git, gdocs, calendar, vault.
+    source: Option<String>,
+    /// Max records per page (default 200, maximum 1000).
     limit: Option<usize>,
 }
 
@@ -108,6 +118,20 @@ impl KbServer {
             .await
             .map_err(|e| query_err(&e))?;
         Ok(Json(SearchResponse { hits }))
+    }
+
+    #[tool(
+        description = "Return a stable page of records changed after an opaque cursor. Use this for incremental consumers such as an LLM-maintained wiki. The response includes next_cursor and has_more."
+    )]
+    async fn get_changes(
+        &self,
+        Parameters(p): Parameters<ChangesParams>,
+    ) -> Result<Json<ChangePage>, ErrorData> {
+        let config = pasta_common::config::kb_config();
+        let limit = p.limit.unwrap_or(200).clamp(1, 1000);
+        let page = kb_query::get_changes(&config, p.cursor.as_deref(), p.source.as_deref(), limit)
+            .map_err(|e| query_err(&e))?;
+        Ok(Json(page))
     }
 
     #[tool(
