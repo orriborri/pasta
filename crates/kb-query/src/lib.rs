@@ -366,7 +366,7 @@ pub fn get_changes(
         .filter(|record| source_filter.is_none_or(|source| record.source.to_string() == source))
         .filter(|record| {
             after.as_ref().is_none_or(|(at, id)| {
-                record.updated_at > *at || (record.updated_at == *at && record.id > *id)
+                record.updated_at > *at || (record.updated_at == *at && record.id.as_str() > id.as_str())
             })
         })
         .collect();
