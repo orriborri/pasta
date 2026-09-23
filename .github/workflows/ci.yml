@@ -26,7 +26,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: LLM wiki toolkit tests
-        run: python3 -m unittest -v llm-wiki/tests/test_wiki.py
+        run: python3 -m unittest discover -s llm-wiki/tests -p 'test_*.py' -v
 
       - name: cargo build --workspace
         run: cargo build --workspace
