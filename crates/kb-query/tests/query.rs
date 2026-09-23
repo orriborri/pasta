@@ -166,3 +166,36 @@ fn get_timeline_is_ordered_and_deterministic() {
     let again = kb_query::get_timeline(&tc.config, &issue, 50).unwrap();
     assert_eq!(tl, again);
 }
+
+#[test]
+fn get_changes_pages_stably_with_opaque_cursor() {
+    let tc = setup();
+
+    let first = kb_query::get_changes(&tc.config, None, None, 1).unwrap();
+    assert_eq!(first.records.len(), 1);
+    assert!(first.has_more);
+    assert_eq!(first.records[0].record_id, "git-repo-abc");
+    let cursor = first.next_cursor.clone().expect("first page has cursor");
+
+    let second = kb_query::get_changes(&tc.config, Some(&cursor), None, 10).unwrap();
+    assert_eq!(second.records.len(), 1);
+    assert!(!second.has_more);
+    assert_eq!(second.records[0].record_id, "slack-C1-1.0");
+    assert_ne!(second.next_cursor.as_deref(), Some(cursor.as_str()));
+
+    let empty = kb_query::get_changes(
+        &tc.config,
+        second.next_cursor.as_deref(),
+        Some("git"),
+        10,
+    )
+    .unwrap();
+    assert!(empty.records.is_empty());
+    assert_eq!(empty.next_cursor, second.next_cursor);
+}
+
+#[test]
+fn get_changes_rejects_malformed_cursor() {
+    let tc = setup();
+    assert!(kb_query::get_changes(&tc.config, Some("not-a-cursor"), None, 10).is_err());
+}
