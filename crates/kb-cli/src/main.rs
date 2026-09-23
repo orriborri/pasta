@@ -37,6 +37,21 @@ enum Cmd {
         #[arg(short, long)]
         source: Option<String>,
     },
+    /// Page through records changed after an opaque cursor
+    Changes {
+        /// Opaque cursor returned by the previous changes page
+        #[arg(long)]
+        cursor: Option<String>,
+        /// Only this source (slack, gmail, linear, ...)
+        #[arg(short, long)]
+        source: Option<String>,
+        /// Maximum records to return (1-1000)
+        #[arg(short, long, default_value = "200")]
+        limit: usize,
+        /// Emit the complete page as JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Rebuild `LanceDB` + Tantivy from Parquet (source of truth)
     Reindex,
     /// Rebuild only the evidence graph (`graph.db`) from Parquet — no re-embedding
@@ -107,6 +122,7 @@ async fn main() -> Result<()> {
         Cmd::Sync { source } => cmd_sync(&config, source.as_deref()).await,
         Cmd::Search { query, limit } => cmd_search(&config, &query.join(" "), limit).await,
         Cmd::Recent { days, source } => cmd_recent(&config, days, source.as_deref()),
+        Cmd::Changes { cursor, source, limit, json } => cmd_changes(&config, cursor.as_deref(), source.as_deref(), limit, json),
         Cmd::Reindex => cmd_reindex(&config).await,
         Cmd::GraphRebuild => cmd_graph_rebuild(&config),
         Cmd::Reprocess => cmd_reprocess(&config).await,
@@ -195,6 +211,38 @@ fn cmd_recent(config: &KbConfig, days: i64, source: Option<&str>) -> Result<()> 
         .collect();
     records.sort_by_key(|r| std::cmp::Reverse(r.created_at));
     println!("{}", serde_json::to_string(&records)?);
+    Ok(())
+}
+
+fn cmd_changes(
+    config: &KbConfig,
+    cursor: Option<&str>,
+    source: Option<&str>,
+    limit: usize,
+    json: bool,
+) -> Result<()> {
+    let page = kb_query::get_changes(config, cursor, source, limit)?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&page)?);
+    } else if page.records.is_empty() {
+        println!("No changed records.");
+        if let Some(cursor) = page.next_cursor {
+            println!("cursor: {cursor}");
+        }
+    } else {
+        for record in &page.records {
+            println!(
+                "{}  {} [{}] {}",
+                record.updated_at, record.record_id, record.source, record.title
+            );
+        }
+        if let Some(cursor) = page.next_cursor {
+            println!("cursor: {cursor}");
+        }
+        if page.has_more {
+            println!("more records available");
+        }
+    }
     Ok(())
 }
 
