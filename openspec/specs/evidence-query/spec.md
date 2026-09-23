@@ -73,3 +73,16 @@ The system SHALL return search results as typed hits carrying `record_id`, sourc
 - **WHEN** the structured search is invoked with a source filter
 - **THEN** only hits from that source are returned
 
+
+
+### Requirement: Incremental consumers can page through changed records
+The system SHALL expose the latest version of records ordered by `updated_at` and record id behind an opaque cursor, so external consumers can incrementally process knowledge changes without rescanning the full store. Repeated Parquet snapshots of the same record id SHALL collapse to the latest version before paging.
+
+#### Scenario: Consumer continues from a cursor
+- **WHEN** a consumer requests changes with a cursor returned by a previous page
+- **THEN** only records ordered after that cursor are returned
+- **AND** the response contains a new opaque cursor and whether more records remain
+
+#### Scenario: Consumer bootstraps without a cursor
+- **WHEN** a consumer requests changes without a cursor
+- **THEN** records are returned from the beginning of the stable ordered change feed in bounded pages
