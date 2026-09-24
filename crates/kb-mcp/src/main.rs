@@ -17,7 +17,7 @@ struct SearchKnowledgeParams {
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 struct ChangesParams {
-    /// Opaque cursor returned by a previous get_changes call. Omit to bootstrap.
+    /// Opaque cursor returned by a previous `get_changes` call. Omit to bootstrap.
     cursor: Option<String>,
     /// Filter by source: slack, gmail, linear, gitlab, git, gdocs, calendar, vault.
     source: Option<String>,
@@ -123,7 +123,7 @@ impl KbServer {
     #[tool(
         description = "Return a stable page of records changed after an opaque cursor. Use this for incremental consumers such as an LLM-maintained wiki. The response includes next_cursor and has_more."
     )]
-    async fn get_changes(
+    fn get_changes(
         &self,
         Parameters(p): Parameters<ChangesParams>,
     ) -> Result<Json<ChangePage>, ErrorData> {
@@ -137,7 +137,7 @@ impl KbServer {
     #[tool(
         description = "Resolve a canonical entity reference (e.g. \"linear:AB-123\") to a typed view: whether a backing record exists and its in/out relation degree."
     )]
-    async fn get_entity(
+    fn get_entity(
         &self,
         Parameters(p): Parameters<EntityParams>,
     ) -> Result<Json<EntityView>, ErrorData> {
@@ -150,7 +150,7 @@ impl KbServer {
     #[tool(
         description = "List the relations connected to an entity (both directions), each with its evidence_record_id and derivation. Optionally filter by relation kind."
     )]
-    async fn get_related(
+    fn get_related(
         &self,
         Parameters(p): Parameters<RelatedParams>,
     ) -> Result<Json<RelatedView>, ErrorData> {
@@ -166,7 +166,7 @@ impl KbServer {
     #[tool(
         description = "Resolve evidence record ids to the underlying records (source, kind, title, snippet, url, timestamp). Records absent from the source of truth are omitted."
     )]
-    async fn get_evidence(
+    fn get_evidence(
         &self,
         Parameters(p): Parameters<EvidenceParams>,
     ) -> Result<Json<EvidenceResponse>, ErrorData> {
@@ -179,7 +179,7 @@ impl KbServer {
     #[tool(
         description = "Assemble an entity context bundle: the entity, its top relations, and the evidence records behind them, in one structured payload."
     )]
-    async fn get_context(
+    fn get_context(
         &self,
         Parameters(p): Parameters<ContextParams>,
     ) -> Result<Json<ContextView>, ErrorData> {
@@ -193,7 +193,7 @@ impl KbServer {
     #[tool(
         description = "Produce a time-ordered list of the evidence records touching an entity (what happened with this entity, in order)."
     )]
-    async fn get_timeline(
+    fn get_timeline(
         &self,
         Parameters(p): Parameters<TimelineParams>,
     ) -> Result<Json<TimelineResponse>, ErrorData> {
