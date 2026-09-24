@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pasta.local/llm-wiki/patch.schema.json",
+  "title": "LLM Wiki Patch v1",
+  "type": "object",
+  "required": ["version", "job_id", "operation", "page", "evidence_record_ids", "content"],
+  "properties": {
+    "version": {"const": 1},
+    "job_id": {"type": "string", "minLength": 1},
+    "operation": {"const": "upsert"},
+    "page": {"type": "string", "pattern": "^[^/].*\\.md$"},
+    "evidence_record_ids": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+    "content": {"type": "string", "minLength": 1}
+  },
+  "additionalProperties": false
+}

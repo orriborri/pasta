@@ -59,6 +59,15 @@ impl VaultLayout {
         self.base.join("0. Inbox")
     }
 
+    /// Path to append-only raw personal captures (0. Inbox/Raw/).
+    ///
+    /// Agent runtimes may write durable user-provided facts, preferences,
+    /// decisions, and notes here instead of relying on runtime-specific memory.
+    #[must_use]
+    pub fn raw_inbox(&self) -> std::path::PathBuf {
+        self.inbox().join("Raw")
+    }
+
     /// Path to the archive directory (4. Archive/)
     #[must_use]
     pub fn archive(&self) -> std::path::PathBuf {

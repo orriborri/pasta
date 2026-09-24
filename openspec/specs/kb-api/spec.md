@@ -5,11 +5,15 @@
 Standalone query interfaces for the knowledge base: MCP server, CLI, and HTTP API.
 ## Requirements
 ### Requirement: MCP server exposes knowledge base tools
-The system SHALL provide an MCP stdio server whose tools return structured (`structured_content`) responses rather than prose blobs. It SHALL expose `search_knowledge` (typed hits including `record_id`), `get_entity`, `get_related`, `get_evidence`, `get_context`, and `get_timeline`.
+The system SHALL provide an MCP stdio server whose tools return structured (`structured_content`) responses rather than prose blobs. It SHALL expose `search_knowledge` (typed hits including `record_id`), `get_changes`, `get_entity`, `get_related`, `get_evidence`, `get_context`, and `get_timeline`.
 
 #### Scenario: AI tool searches knowledge base
 - **WHEN** an MCP client calls `search_knowledge` with query "EKS upgrade process"
 - **THEN** it returns structured hits, each with `record_id`, source, title, snippet, url, timestamp, and relevance score
+
+#### Scenario: Incremental consumer requests changes
+- **WHEN** an MCP client calls `get_changes` with an optional opaque cursor
+- **THEN** it receives a bounded, stable page of changed records plus `next_cursor` and `has_more`
 
 #### Scenario: AI tool resolves an entity's relations
 - **WHEN** an MCP client calls `get_related` for an entity

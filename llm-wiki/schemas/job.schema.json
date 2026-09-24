@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pasta.local/llm-wiki/job.schema.json",
+  "title": "LLM Wiki Job",
+  "type": "object",
+  "required": ["job_id", "entity", "evidence_record_ids", "existing_evidence_record_ids", "candidate_pages", "records"],
+  "properties": {
+    "job_id": {"type": "string", "minLength": 1},
+    "entity": {"type": "string", "minLength": 1},
+    "evidence_record_ids": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "existing_evidence_record_ids": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "candidate_pages": {"type": "array", "items": {"type": "string", "pattern": "\\.md$"}, "uniqueItems": true},
+    "records": {"type": "array", "items": {"type": "object"}}
+  },
+  "additionalProperties": false
+}

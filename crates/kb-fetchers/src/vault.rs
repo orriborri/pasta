@@ -42,6 +42,18 @@ impl VaultFetcher {
             }
         }
 
+        // Raw personal inbox (0. Inbox/Raw/) — append-only captures from
+        // external agents. This is intentionally the only Inbox subtree indexed
+        // here; generated daily notes and other operational files stay out.
+        let raw_inbox_dir = layout.raw_inbox();
+        if raw_inbox_dir.exists() {
+            for path in walk_md(&raw_inbox_dir) {
+                if let Some(r) = Self::file_to_record(&path, "raw-inbox") {
+                    records.push(r);
+                }
+            }
+        }
+
         // Projects (1. Projects/)
         let projects_dir = layout.projects();
         if projects_dir.exists() {
@@ -121,4 +133,52 @@ fn slug(s: &str) -> String {
         .filter(|p| !p.is_empty())
         .collect::<Vec<_>>()
         .join("-")
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_vault() -> PathBuf {
+        let mut dir = std::env::temp_dir();
+        dir.push(format!(
+            "pasta-vault-fetcher-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(dir.join("0. Inbox/Raw")).unwrap();
+        dir
+    }
+
+    #[test]
+    fn raw_inbox_is_ingested_but_other_inbox_files_are_not() {
+        let dir = temp_vault();
+        std::fs::write(
+            dir.join("0. Inbox/Raw/capture.md"),
+            "---\nkind: preference\n---\n\nUser prefers concise updates.\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("0. Inbox/operational.md"),
+            "This operational inbox file must not be indexed by VaultFetcher.",
+        )
+        .unwrap();
+
+        let records = VaultFetcher::new(&dir).fetch().unwrap();
+        let raw: Vec<_> = records
+            .iter()
+            .filter(|record| record.tags.iter().any(|tag| tag == "raw-inbox"))
+            .collect();
+
+        assert_eq!(raw.len(), 1);
+        assert_eq!(raw[0].title, "capture");
+        assert!(raw[0].content.contains("prefers concise updates"));
+        assert!(!records.iter().any(|record| record.title == "operational"));
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }

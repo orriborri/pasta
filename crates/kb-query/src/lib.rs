@@ -116,6 +116,31 @@ pub struct SearchHit {
     pub score: f32,
 }
 
+/// A lightweight record surfaced by the incremental change feed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct ChangeHit {
+    pub record_id: String,
+    pub source: String,
+    pub kind: String,
+    pub title: String,
+    pub url: String,
+    pub author: String,
+    pub participants: Vec<String>,
+    pub thread_id: String,
+    pub entities: Vec<String>,
+    pub tags: Vec<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// A stable, paged view of records that changed after an opaque cursor.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct ChangePage {
+    pub records: Vec<ChangeHit>,
+    pub next_cursor: Option<String>,
+    pub has_more: bool,
+}
+
 const fn kind_tag(kind: kb_core::Kind) -> &'static str {
     match kind {
         kb_core::Kind::Message => "message",
@@ -306,6 +331,100 @@ pub async fn search(
             }
         })
         .collect())
+}
+
+/// Return a stable page of the latest version of records after an opaque cursor.
+///
+/// The cursor encodes the updated timestamp and record id. Records are
+/// deduplicated by id before paging so repeated Parquet snapshots do not produce
+/// duplicate wiki-maintenance work.
+///
+/// # Errors
+/// Returns an error if Parquet cannot be read or the cursor is malformed.
+pub fn get_changes(
+    config: &KbConfig,
+    cursor: Option<&str>,
+    source_filter: Option<&str>,
+    limit: usize,
+) -> Result<ChangePage> {
+    use std::collections::HashMap;
+
+    let parquet = ParquetStore::new(config);
+    let mut latest: HashMap<String, Record> = HashMap::new();
+    for record in parquet.read_all()? {
+        let replace = latest
+            .get(&record.id)
+            .is_none_or(|current| record.updated_at > current.updated_at);
+        if replace {
+            latest.insert(record.id.clone(), record);
+        }
+    }
+
+    let after = cursor.map(parse_change_cursor).transpose()?;
+    let mut records: Vec<Record> = latest
+        .into_values()
+        .filter(|record| source_filter.is_none_or(|source| record.source.to_string() == source))
+        .filter(|record| {
+            after.as_ref().is_none_or(|(at, id)| {
+                record.updated_at > *at || (record.updated_at == *at && record.id.as_str() > id.as_str())
+            })
+        })
+        .collect();
+
+    records.sort_by(|a, b| {
+        a.updated_at
+            .cmp(&b.updated_at)
+            .then_with(|| a.id.cmp(&b.id))
+    });
+
+    let limit = limit.clamp(1, 1000);
+    let has_more = records.len() > limit;
+    records.truncate(limit);
+    let next_cursor = records
+        .last()
+        .map(change_cursor)
+        .or_else(|| cursor.map(str::to_string));
+
+    let records = records
+        .into_iter()
+        .map(|record| ChangeHit {
+            record_id: record.id,
+            source: record.source.to_string(),
+            kind: kind_tag(record.kind).to_string(),
+            title: record.title,
+            url: record.url,
+            author: record.author,
+            participants: record.participants,
+            thread_id: record.thread_id,
+            entities: record.entities,
+            tags: record.tags,
+            created_at: record.created_at.to_rfc3339(),
+            updated_at: record.updated_at.to_rfc3339(),
+        })
+        .collect();
+
+    Ok(ChangePage {
+        records,
+        next_cursor,
+        has_more,
+    })
+}
+
+fn parse_change_cursor(cursor: &str) -> Result<(DateTime<Utc>, String)> {
+    let (timestamp, record_id) = cursor
+        .split_once('|')
+        .ok_or_else(|| anyhow::anyhow!("invalid change cursor"))?;
+    if record_id.is_empty() {
+        return Err(anyhow::anyhow!("invalid change cursor"));
+    }
+    let updated_at = DateTime::parse_from_rfc3339(timestamp)
+        .map_err(|_| anyhow::anyhow!("invalid change cursor"))?
+        .with_timezone(&Utc);
+    Ok((updated_at, record_id.to_string()))
+}
+
+fn change_cursor(record: &Record) -> String {
+    format!("{}|{}", record.updated_at.to_rfc3339(), record.id)
 }
 
 /// Whether a backing record exists in Parquet for the entity. Matches the

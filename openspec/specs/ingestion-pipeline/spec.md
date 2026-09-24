@@ -81,3 +81,16 @@ Each stage SHALL implement a `PipelineStage` trait accepting and returning `Vec<
 - **WHEN** user runs `kb sync`
 - **THEN** it calls the same `kb_sync::run()` function
 - **AND** behavior is identical to the backend invocation
+
+
+### Requirement: Raw personal inbox is ingested as evidence
+The system SHALL ingest Markdown files under the configured vault's `0. Inbox/Raw/` directory as vault records tagged `raw-inbox`. Other files under `0. Inbox/` SHALL NOT be included by this rule.
+
+#### Scenario: Agent externalizes a durable user statement
+- **WHEN** an external agent writes a Markdown capture to `0. Inbox/Raw/`
+- **THEN** the next vault sync stores that capture as a Pasta evidence record
+- **AND** the record is tagged `raw-inbox`
+
+#### Scenario: Operational inbox files remain excluded
+- **WHEN** a Markdown file exists directly under `0. Inbox/` or another non-Raw inbox subtree
+- **THEN** the vault fetcher does not ingest it solely because it is in the inbox

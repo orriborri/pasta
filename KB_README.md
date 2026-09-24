@@ -82,6 +82,7 @@ internal_slack = true
 | `kb sync --source slack` | Sync only specific sources |
 | `kb search "query"` | Hybrid search (vector + full-text) |
 | `kb recent --days N` | List records from the last N days as JSON (pasta inbox processing) |
+| `kb changes --json [--cursor CURSOR]` | Page through changed records for incremental external consumers |
 | `kb reindex` | Rebuild LanceDB + Tantivy from Parquet |
 
 ## Crates

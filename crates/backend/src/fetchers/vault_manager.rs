@@ -130,7 +130,7 @@ fn deduplicate_tasks() {
         if entries.len() <= 1 { continue; }
 
         // Sort by content length descending — keep the richest file
-        entries.sort_by(|a, b| b.1.cmp(&a.1));
+        entries.sort_by_key(|entry| std::cmp::Reverse(entry.1));
 
         // Archive all but the first (richest)
         for (path, _) in &entries[1..] {
