@@ -93,9 +93,7 @@ async fn fetch_outcome_with_lookback(
                 parquet.write_changed(&records)?;
                 state.commit_windows()?;
                 successful_sources.push((*src).to_string());
-                if !records.is_empty() {
-                    info!(source = src, count = records.len(), "fetched");
-                }
+                info!(source = src, count = records.len(), "fetched");
                 all_records.extend(records);
             }
             Err(e) => {

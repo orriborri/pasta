@@ -4,7 +4,7 @@ import unittest
 from unittest.mock import patch as mock_patch
 from pathlib import Path
 
-spec = importlib.util.spec_from_file_location("wiki_toolkit", Path(__file__).parent.parent / "wiki.py")
+spec = importlib.util.spec_from_file_location("wiki_toolkit", Path(__file__).parent.parent / "vault.py")
 wiki = importlib.util.module_from_spec(spec)
 import sys
 sys.modules[spec.name] = wiki
@@ -116,10 +116,10 @@ class WikiToolkitTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td) / "Knowledge"
             root.mkdir()
-            existing = root / "Projects" / "Alpha.md"
-            existing.parent.mkdir()
+            existing = root / ".llm-wiki" / "generated" / "Projects" / "Alpha.md"
+            existing.parent.mkdir(parents=True)
             existing.write_text(
-                "---\nentities:\n  - project:alpha\nevidence:\n  - old-1\n---\n\n# Alpha\n\nOld fact [src](pasta:evidence:old-1)\n",
+                "---\nllm_wiki: 1\nentities:\n  - project:alpha\nevidence:\n  - old-1\n---\n\n# Alpha\n\nOld fact [src](pasta:evidence:old-1)\n",
                 encoding="utf-8",
             )
             changes = {
@@ -141,23 +141,29 @@ class WikiToolkitTests(unittest.TestCase):
             }
             plan = wiki.build_plan(root, changes)
             alpha = next(j for j in plan["jobs"] if j["entity"] == "project:alpha")
-            self.assertEqual(alpha["candidate_pages"], ["Projects/Alpha.md"])
+            self.assertEqual(alpha["candidate_pages"], [".llm-wiki/generated/Projects/Alpha.md"])
             self.assertIn("old-1", alpha["existing_evidence_record_ids"])
 
             patch = {
                 "version": 1,
                 "job_id": alpha["job_id"],
                 "operation": "upsert",
-                "page": "Projects/Alpha.md",
+                "page": ".llm-wiki/generated/Projects/Alpha.md",
                 "evidence_record_ids": ["old-1", "slack-C1-1"],
                 "content": (
-                    "---\nentities:\n  - project:alpha\nevidence:\n"
+                    "---\nllm_wiki: 1\nentities:\n  - project:alpha\nevidence:\n"
                     "  - old-1\n  - slack-C1-1\n---\n\n# Alpha\n\n"
                     "Old fact [src](pasta:evidence:old-1). New fact "
                     "[src](pasta:evidence:slack-C1-1).\n"
                 ),
             }
             self.assertEqual(wiki.validate_patch(root, plan, patch), [])
+            unmarked = dict(patch, content=patch["content"].replace("llm_wiki: 1\n", ""))
+            self.assertIn("llm_wiki", wiki.validate_patch(root, plan, unmarked)[0])
+            para_page = dict(patch, page="1. Projects/Alpha.md")
+            self.assertIn(".llm-wiki/generated", wiki.validate_patch(root, plan, para_page)[0])
+            unsafe_state = dict(patch, page=".llm-wiki/state.json")
+            self.assertIn("unsafe wiki page path", wiki.validate_patch(root, plan, unsafe_state)[0])
             target = wiki.apply_patch(root, plan, patch)
             self.assertTrue(target.exists())
             report = wiki.audit(root)
@@ -178,9 +184,9 @@ class WikiToolkitTests(unittest.TestCase):
                 "version": 1,
                 "job_id": job["job_id"],
                 "operation": "upsert",
-                "page": "Projects/X.md",
+                "page": ".llm-wiki/generated/Projects/X.md",
                 "evidence_record_ids": ["made-up"],
-                "content": "---\nentities:\n  - project:x\n---\n\n# X\n[p](pasta:evidence:made-up)\n",
+                "content": "---\nllm_wiki: 1\nentities:\n  - project:x\n---\n\n# X\n[p](pasta:evidence:made-up)\n",
             }
             self.assertTrue(wiki.validate_patch(root, plan, patch))
 

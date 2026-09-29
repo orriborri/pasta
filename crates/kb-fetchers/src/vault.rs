@@ -82,7 +82,11 @@ impl VaultFetcher {
 
     fn file_to_record(&self, path: &Path, tag: &str) -> Option<Record> {
         let content = fs::read_to_string(path).ok()?;
-        if content.trim().is_empty() { return None; }
+        if content.trim().is_empty()
+            || pasta_common::vault::has_frontmatter_value(&content, "llm_wiki", "1")
+        {
+            return None;
+        }
 
         let stem = path.file_stem()?.to_string_lossy().to_string();
         // Use the relative path, not the basename: separate folders can contain
@@ -154,6 +158,21 @@ mod tests {
         ));
         std::fs::create_dir_all(dir.join("0. Inbox/Raw")).unwrap();
         dir
+    }
+
+    #[test]
+    fn generated_pages_are_excluded_inside_para() {
+        let dir = temp_vault();
+        for folder in ["1. Projects", "2. Areas", "3. Resources"] {
+            let root = dir.join(folder);
+            fs::create_dir_all(&root).unwrap();
+            fs::write(root.join("generated.md"), "---\nllm_wiki: 1\n---\nDerived prose").unwrap();
+            fs::write(root.join("manual.md"), "---\nstatus: active\n---\nOriginal note\nllm_wiki: 1").unwrap();
+        }
+        let records = VaultFetcher::new(&dir).fetch().unwrap();
+        assert_eq!(records.len(), 3);
+        assert!(records.iter().all(|r| r.title == "manual"));
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

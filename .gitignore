@@ -14,7 +14,6 @@
 
 # Stray literal-tilde dir created when a `~` path isn't expanded
 /~
-
 # Ralph execution state
 .ralph/
 

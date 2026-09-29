@@ -22,8 +22,9 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Iterable
 
 STATE_DIR = ".llm-wiki"
+GENERATED_DIR = ".llm-wiki/generated"
 STATE_FILE = "state.json"
-DEFAULT_SECTIONS = ("People", "Projects", "Systems", "Decisions", "Concepts", "Topics", "Syntheses")
+DEFAULT_SECTIONS = ("1. Projects", "2. Areas", "3. Resources", "4. Archive")
 CITATION_RE = re.compile(r"pasta:evidence:([^\s\])}>;,]+)")
 
 
@@ -161,13 +162,10 @@ class PageIndex:
 
 
 def iter_markdown(wiki: Path) -> Iterable[Path]:
-    if not wiki.exists():
+    generated = wiki / GENERATED_DIR
+    if not generated.exists():
         return []
-    return (
-        p
-        for p in wiki.rglob("*.md")
-        if STATE_DIR not in p.parts and p.is_file()
-    )
+    return (p for p in generated.rglob("*.md") if p.is_file())
 
 
 def index_pages(wiki: Path) -> list[PageIndex]:
@@ -300,8 +298,8 @@ def safe_page_path(page: str) -> PurePosixPath:
     p = PurePosixPath(page)
     if p.is_absolute() or ".." in p.parts or "\\" in page or not p.parts or p.suffix.lower() != ".md":
         raise WikiError(f"unsafe wiki page path: {page!r}")
-    if STATE_DIR in p.parts:
-        raise WikiError(f"page may not be written under {STATE_DIR}/")
+    if len(p.parts) < 3 or p.parts[:2] != (".llm-wiki", "generated"):
+        raise WikiError("machine-generated pages must live under .llm-wiki/generated/")
     return p
 
 
@@ -334,6 +332,8 @@ def validate_patch(wiki: Path, plan: dict[str, Any], patch: dict[str, Any]) -> l
             raise WikiError("patch.content must start with YAML frontmatter")
 
         meta = parse_frontmatter(content)
+        if meta.get("llm_wiki") != "1":
+            raise WikiError("frontmatter must include llm_wiki: 1 to prevent evidence feedback")
         entities = meta.get("entities", [])
         if isinstance(entities, str):
             entities = [entities]
@@ -485,6 +485,7 @@ def cmd_init(args: argparse.Namespace) -> int:
     wiki.mkdir(parents=True, exist_ok=True)
     for name in DEFAULT_SECTIONS:
         (wiki / name).mkdir(exist_ok=True)
+    (wiki / GENERATED_DIR).mkdir(parents=True, exist_ok=True)
     if not state_path(wiki).exists():
         save_state(wiki, {"version": 1, "cursor": None})
     write_json({"wiki": str(wiki), "state": str(state_path(wiki)), "cursor": load_state(wiki).get("cursor")})
@@ -542,9 +543,25 @@ def cmd_audit(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_help(args: argparse.Namespace) -> int:
+    top = parser()
+    if not args.topic:
+        top.print_help()
+        return 0
+    subparsers_action = next(
+        a for a in top._subparsers._group_actions if isinstance(a, argparse._SubParsersAction)
+    )
+    sub = subparsers_action.choices.get(args.topic)
+    if sub is None:
+        print(f"vault-toolkit: no such command: {args.topic}", file=sys.stderr)
+        return 2
+    sub.print_help()
+    return 0
+
+
 def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Deterministic orchestration for an LLM-maintained Pasta-backed wiki")
-    sub = p.add_subparsers(dest="command", required=True)
+    sub = p.add_subparsers(dest="command", required=False)
 
     x = sub.add_parser("init", help="initialize a wiki root and cursor state")
     x.add_argument("--wiki", type=Path, required=True)
@@ -590,12 +607,20 @@ def parser() -> argparse.ArgumentParser:
     x.add_argument("--wiki", type=Path, required=True)
     x.add_argument("--out", type=Path, default=Path("-"))
     x.set_defaults(func=cmd_audit)
+
+    x = sub.add_parser("help", help="show help, optionally for a specific command")
+    x.add_argument("topic", nargs="?", default=None)
+    x.set_defaults(func=cmd_help)
     return p
 
 
 def main() -> int:
     try:
-        args = parser().parse_args()
+        p = parser()
+        args = p.parse_args()
+        if args.command is None:
+            p.print_help()
+            return 0
         return int(args.func(args))
     except (WikiError, json.JSONDecodeError, OSError) as exc:
         print(f"wiki-toolkit: {exc}", file=sys.stderr)

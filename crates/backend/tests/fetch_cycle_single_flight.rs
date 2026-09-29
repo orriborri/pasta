@@ -176,3 +176,16 @@ fn completed_set_merge_behavior() {
     // Verify size is correct (5 new + 2 old = 7 total)
     assert_eq!(merged.len(), 7);
 }
+
+#[test]
+fn fetch_cycle_includes_vault_source() {
+    let root = workspace_root();
+    let fetch_cycle_content = std::fs::read_to_string(
+        format!("{}/src/fetch_cycle.rs", root)
+    ).expect("Could not read fetch_cycle.rs");
+
+    assert!(
+        fetch_cycle_content.contains("\"vault\""),
+        "fetch cycle must include the vault source so vault-backed search is not stale"
+    );
+}

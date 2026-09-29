@@ -26,6 +26,10 @@ Useful Pasta MCP tools include:
 
 The compiled wiki can be used as a navigation/synthesis layer, but Pasta evidence is authoritative.
 
+## PARA maintenance
+
+When the user asks to improve the PARA vault from the LLM wiki, inspect relevant pages under `.llm-wiki/generated/`, verify proposed claims against Pasta evidence, and update the existing canonical PARA note with a concise synthesis and nearby evidence citations. Keep `1. Projects/` for active outcome-based commitments, `2. Areas/` for ongoing responsibilities, `3. Resources/` for reusable reference, and `4. Archive/` for inactive material. Do not copy issue-by-issue generated pages into Projects or replace a human note with generated prose.
+
 ## Write path
 
 When the user provides information that should persist across sessions, follow the sibling `raw-inbox-memory` skill.
@@ -39,12 +43,12 @@ user statement
      ↓
 Pasta evidence
      ↓
-LLM Wiki compiler  (later synthesis)
-     ↓
-Knowledge/
+LLM Wiki compiler  (generated working pages)
+     ↓  explicit curation after evidence verification
+existing PARA notes  (human-readable summaries)
 ```
 
-Do not directly promote a new personal statement into a curated People/Projects/Concepts page during the same conversational turn unless the user explicitly asks for that edit.
+Do not directly promote a new personal statement into a curated PARA page during the same conversational turn unless the user explicitly asks for that edit.
 
 ## Behavior
 

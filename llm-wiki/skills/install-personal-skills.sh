@@ -19,7 +19,7 @@ done
 install_one() {
   local base="$1"
   mkdir -p "$base"
-  for skill in personal-agent raw-inbox-memory; do
+  for skill in personal-agent raw-inbox-memory daily-plan; do
     local src="$SCRIPT_DIR/$skill"
     local dst="$base/$skill"
     if [[ -e "$dst" && "$FORCE" -ne 1 ]]; then

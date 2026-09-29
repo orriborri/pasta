@@ -266,6 +266,10 @@ enabled = true
 interval_minutes = 60
 enabled = true
 
+[schedules.vault]
+interval_minutes = 60
+enabled = true
+
 [schedules.vault-maintenance]
 interval_minutes = 1440
 enabled = true

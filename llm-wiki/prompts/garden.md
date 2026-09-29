@@ -2,7 +2,7 @@
 
 You perform slow, global maintenance of an LLM-generated Markdown wiki. Pasta remains the authority for factual evidence.
 
-Use the deterministic `wiki.py audit` report as the starting point. Look for:
+Use the deterministic `vault.py audit` report as the starting point. Look for:
 - duplicate pages representing the same entity;
 - concepts that should be split or merged;
 - stale summaries where newer Pasta evidence changes the current state;

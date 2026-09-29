@@ -18,14 +18,17 @@ The toolkit also includes two open Agent Skills:
 
 - `personal-agent` — retrieves prior personal context from Pasta and treats Pasta as the cross-session knowledge system.
 - `raw-inbox-memory` — externalizes durable user-provided information into `0. Inbox/Raw/` instead of relying on model/provider memory.
+- `daily-plan` — recommends today's top priorities from the daily note, tasks, active projects, and current Pasta context.
 
-Install both as personal skills for Claude Code and Codex:
+Install the skills for Claude Code and Codex:
 
 ```bash
 bash llm-wiki/skills/install-personal-skills.sh --both
 ```
 
 This installs the same skill bundles to `~/.claude/skills/` and `~/.codex/skills/`. Claude Code and Codex both support filesystem `SKILL.md` skills, so there is no provider-specific prompt fork.
+
+Run `$daily-plan` or ask what to focus on today for a ready-to-review suggestion with up to three priorities and a concrete first action. It does not edit the daily note unless asked.
 
 Raw capture flow:
 
@@ -44,10 +47,10 @@ Pasta evidence
 LLM Wiki maintenance
           |
           v
-Knowledge/
+vault (wiki root)
 ```
 
-Pasta deliberately indexes only the `0. Inbox/Raw/` subtree of the operational inbox. The compiled `Knowledge/` wiki remains excluded from evidence ingestion, preventing generated prose from becoming self-reinforcing evidence.
+Pasta deliberately indexes only the `0. Inbox/Raw/` subtree of the operational inbox. Generated wiki pages live inside PARA and carry `llm_wiki: 1`. `VaultFetcher` excludes these pages from evidence ingestion regardless of their folder.
 
 The capture helper rejects obvious credential-like content by default and never silently claims persistence when a write fails.
 
@@ -57,7 +60,7 @@ The capture helper rejects obvious credential-like content by default and never 
 Pasta get_changes / kb changes
           |
           v
-    wiki.py plan
+    vault.py plan
           |
           v
     portable JSON jobs
@@ -69,24 +72,32 @@ Pasta get_changes / kb changes
     portable JSON patch
           |
           v
- wiki.py validate/apply
+ vault.py validate/apply
           |
           v
-    wiki.py advance
+    vault.py advance
 ```
 
-For an Obsidian vault used by Pasta, `Knowledge/` is a good wiki root because the current Pasta `VaultFetcher` only ingests the configured PARA/task/person roots. Keep the compiled wiki outside those evidence roots so generated prose does not feed back into the evidence store.
+The PARA folders are human-curated. `vault.py init` creates them and `.llm-wiki/generated/`; all machine-generated pages belong under that hidden working folder and carry `llm_wiki: 1`. The planner reads generated pages there, and the vault fetcher excludes them.
+
+Use existing canonical PARA pages when they cover the subject. Preserve their content and citations. Before converting an original note into a generated page, retain its source in `0. Inbox/Raw/`; marking a page excludes the entire page from future ingestion.
+
+- Keep `1. Projects/` for active, outcome-based commitments; use `2. Areas/` for ongoing responsibilities, `3. Resources/` for reusable reference, and `4. Archive/` for inactive material.
+- Sort by current actionability, not by whether a person or model created the material. When asked to improve PARA, verify generated claims against Pasta and synthesize useful updates into existing canonical notes with evidence citations.
+- Use links for relationships; do not duplicate a page across folders.
+
+Deploy the updated fetcher before moving generated pages into indexed folders. Existing evidence records are retained; this exclusion prevents future ingestion and does not purge previously indexed prose.
 
 ## Quick start
 
 ```bash
-python llm-wiki/wiki.py init --wiki ~/vault/Knowledge
+python llm-wiki/vault.py init --wiki ~/vault
 
-CURSOR="$(python llm-wiki/wiki.py cursor --wiki ~/vault/Knowledge)"
+CURSOR="$(python llm-wiki/vault.py cursor --wiki ~/vault)"
 kb changes --json ${CURSOR:+--cursor "$CURSOR"} > /tmp/wiki-changes.json
 
-python llm-wiki/wiki.py plan \
-  --wiki ~/vault/Knowledge \
+python llm-wiki/vault.py plan \
+  --wiki ~/vault \
   --changes /tmp/wiki-changes.json \
   --out /tmp/wiki-plan.json
 ```
@@ -94,13 +105,13 @@ python llm-wiki/wiki.py plan \
 Give one job from `/tmp/wiki-plan.json` plus `prompts/maintain.md` to your chosen LLM. The model may call Pasta MCP tools (`get_context`, `get_evidence`, `get_timeline`, `search_knowledge`) and must return JSON matching `schemas/patch.schema.json`.
 
 ```bash
-python llm-wiki/wiki.py validate \
-  --wiki ~/vault/Knowledge \
+python llm-wiki/vault.py validate \
+  --wiki ~/vault \
   --plan /tmp/wiki-plan.json \
   --patch /tmp/wiki-patch.json
 
-python llm-wiki/wiki.py apply \
-  --wiki ~/vault/Knowledge \
+python llm-wiki/vault.py apply \
+  --wiki ~/vault \
   --plan /tmp/wiki-plan.json \
   --patch /tmp/wiki-patch.json
 ```
@@ -108,8 +119,8 @@ python llm-wiki/wiki.py apply \
 After all jobs from the change page have succeeded, advance the durable cursor:
 
 ```bash
-python llm-wiki/wiki.py advance \
-  --wiki ~/vault/Knowledge \
+python llm-wiki/vault.py advance \
+  --wiki ~/vault \
   --changes /tmp/wiki-changes.json \
   --plan /tmp/wiki-plan.json
 ```
@@ -117,7 +128,7 @@ python llm-wiki/wiki.py advance \
 Each applied patch records a durable completion receipt. Jobs needing no page change must be explicitly completed with a reason:
 
 ```bash
-python llm-wiki/wiki.py skip --wiki ~/vault/Knowledge \
+python llm-wiki/vault.py skip --wiki ~/vault \
   --plan /tmp/wiki-plan.json --job-id JOB_ID --reason "No durable change"
 ```
 
@@ -155,7 +166,7 @@ The service is migrating to EKS. [source](pasta:evidence:linear-RP-123)
 - `skip` — record an explicit no-change decision with its reason.
 - `audit` — report uncited pages, missing entity metadata, duplicate entity ownership, and all referenced evidence IDs.
 
-The `audit` evidence ID list can be resolved in bulk through Pasta `get_evidence` to detect stale/broken references without granting the LLM authority to invent replacements.
+The `audit` report covers generated pages under `.llm-wiki/generated/`. Resolve its evidence ID list through Pasta `get_evidence` to detect stale or broken references.
 
 ## Design rules
 

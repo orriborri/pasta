@@ -20,7 +20,8 @@ You may read candidate pages and call Pasta MCP tools such as `get_context`, `ge
 - Never create a factual assertion without one or more Pasta evidence record IDs.
 - Preserve historical statements when later evidence changes the current state. Explain the transition instead of rewriting history as if the earlier state never existed.
 - If sources genuinely conflict and the conflict cannot be resolved from evidence, represent the contradiction explicitly.
-- Prefer updating an existing page over creating a near-duplicate page.
+- Write machine-generated pages only under `.llm-wiki/generated/`.
+- Do not create one page per Linear issue or task unless its evidence supports a useful, durable summary. If it does, write under `.llm-wiki/generated/Linear Issues/` with a readable title. If evidence does not identify the issue title or project, state that plainly instead of using a batch placeholder.
 - Keep pages focused around durable entities/concepts, not individual messages.
 - Do not create relationships merely because two records are semantically similar.
 - Do not cite record IDs that are outside the job or already present on the existing target page unless you first retrieve them through Pasta and the orchestrator expands the job boundary.
@@ -30,7 +31,7 @@ You may read candidate pages and call Pasta MCP tools such as `get_context`, `ge
 Return only JSON matching `schemas/patch.schema.json`.
 
 The `content` field is the complete replacement Markdown for the target page. It must:
-- start with YAML frontmatter;
+- start with YAML frontmatter containing `llm_wiki: 1` (required to exclude generated prose from evidence ingestion);
 - include the job entity in `entities`;
 - keep an `evidence` list;
 - use inline citations such as `[source](pasta:evidence:RECORD_ID)` near factual claims.

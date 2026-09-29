@@ -61,6 +61,6 @@ If capture fails, tell the user it was not persisted. Never pretend storage succ
 
 ## After capture
 
-Do not immediately turn the raw capture into curated wiki knowledge yourself. Pasta ingests `0. Inbox/Raw/` as raw evidence; the separate wiki maintenance workflow performs synthesis later.
+Do not immediately turn the raw capture into curated wiki knowledge; Pasta ingests it as evidence for later synthesis. For an explicitly requested PARA update, follow the `personal-agent` skill.
 
 Only run an immediate Pasta vault sync when the user needs the new capture to become searchable right away.
