@@ -1,9 +1,17 @@
 ---
 name: personal-agent
-description: Act as a grounded personal assistant using Pasta for cross-session context and the raw inbox for new durable information. Use for personal planning, follow-ups, projects, household context, decisions, preferences, or any task where prior personal context may matter.
+description: Retrieve the user's prior personal context from Pasta instead of
+  guessing or relying on model memory. Use when the user asks what they said,
+  decided, or planned before, refers to people, projects, or household matters
+  from earlier sessions, or asks for follow-ups that depend on past context.
+license: UNLICENSED
+metadata:
+  id: a1b2c3d4-e5f6-4a5b-9c8d-7e6f5a4b3c2d
+  author: Oscar Henriksson <oscar.henriksson91@gmail.com>
+  terum-category: workflow
 ---
 
-# Personal Agent
+# Personal Context from Pasta
 
 Use Pasta as the external personal knowledge system. Treat model/session memory as working context only, not as the authoritative long-term store.
 
@@ -24,11 +32,14 @@ Useful Pasta MCP tools include:
 - `get_evidence`;
 - `get_changes`.
 
-The compiled wiki can be used as a navigation/synthesis layer, but Pasta evidence is authoritative.
+### Background from the compiled wiki
 
-## PARA maintenance
+Pasta search does not index the compiled wiki, so read it directly when you need orientation on a person, issue, or system. It lives at `<vault>/.llm-wiki/generated/` (vault path: `~/.pasta/config.toml` → `[general].vault_path`):
+- `Linear Issues/<key>.md`, lowercase issue key, for example `ops-233.md`;
+- `Profiles/<name-slug>.md` for people and organizations;
+- `Systems/` for services, bots, and infrastructure; `Topics/` for channel and theme digests.
 
-When the user asks to improve the PARA vault from the LLM wiki, inspect relevant pages under `.llm-wiki/generated/`, verify proposed claims against Pasta evidence, and update the existing canonical PARA note with a concise synthesis and nearby evidence citations. Keep `1. Projects/` for active outcome-based commitments, `2. Areas/` for ongoing responsibilities, `3. Resources/` for reusable reference, and `4. Archive/` for inactive material. Do not copy issue-by-issue generated pages into Projects or replace a human note with generated prose.
+Wiki prose is a synthesis and may be stale. Before stating a wiki claim as fact, resolve its `pasta:evidence:<record_id>` citation with `get_evidence`; drop or flag claims you cannot verify. Wiki and PARA maintenance belong to the vault's `llm-wiki` skill.
 
 ## Write path
 

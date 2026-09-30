@@ -1,0 +1,12 @@
+should_trigger:
+  - Run the vault.py plan step for the next cursor batch and validate the patch before applying it.
+  - Update the LLM wiki with the latest Pasta changes and advance the cursor when done.
+  - Audit the generated wiki under .llm-wiki and tell me which pages have unresolved evidence IDs.
+  - Improve my Q4 Pricing project note using what the generated wiki pages say, with evidence citations.
+  - Use Pasta get_changes and draft wiki patches citing pasta:evidence record IDs.
+should_not_trigger:
+  - Search my vault for what I noted about the descaling interval for my kettle.
+  - Use the Obsidian CLI to append today's standup summary to my daily note.
+  - Remember that I prefer dark roast coffee with no sugar.
+  - What should I focus on today?
+  - Refactor the Python script in ~/code/pasta/llm-wiki so the argument parsing uses argparse subcommands.

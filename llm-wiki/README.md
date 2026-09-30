@@ -14,19 +14,11 @@ Generated wiki prose is context, not evidence. New factual claims must cite Past
 
 ## Personal agent skills
 
-The toolkit also includes two open Agent Skills:
-
-- `personal-agent` — retrieves prior personal context from Pasta and treats Pasta as the cross-session knowledge system.
-- `raw-inbox-memory` — externalizes durable user-provided information into `0. Inbox/Raw/` instead of relying on model/provider memory.
-- `daily-plan` — recommends today's top priorities from the daily note, tasks, active projects, and current Pasta context.
-
-Install the skills for Claude Code and Codex:
+The agent skills that drive this toolkit (`llm-wiki`, `personal-agent`, `raw-inbox-memory`, `daily-plan`, `weekly-review`) live in `agent/skills/`. See `agent/skills/README.md`; install with:
 
 ```bash
-bash llm-wiki/skills/install-personal-skills.sh --both
+agent/install-skills.sh
 ```
-
-This installs the same skill bundles to `~/.claude/skills/` and `~/.codex/skills/`. Claude Code and Codex both support filesystem `SKILL.md` skills, so there is no provider-specific prompt fork.
 
 Run `$daily-plan` or ask what to focus on today for a ready-to-review suggestion with up to three priorities and a concrete first action. It does not edit the daily note unless asked.
 

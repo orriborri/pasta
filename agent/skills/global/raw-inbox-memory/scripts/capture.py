@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Append one user-provided statement to Pasta's raw personal inbox."""
 from __future__ import annotations
 

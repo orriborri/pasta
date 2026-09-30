@@ -1,6 +1,15 @@
 ---
 name: raw-inbox-memory
-description: Externalize durable personal information into Pasta's append-only raw inbox instead of agent-specific memory. Use whenever the user asks to remember, save, note, keep, or recall something later, or states a stable preference, decision, relationship, or personal fact that should survive future sessions.
+description: Externalize durable personal information into Pasta's append-only
+  raw inbox instead of agent-specific memory. Use whenever the user asks to
+  remember, save, note, or keep something for later, or states a stable
+  preference, decision, relationship, or personal fact that should survive
+  future sessions. For looking up what was saved, use personal-agent.
+license: UNLICENSED
+metadata:
+  id: c3d4e5f6-a7b8-6c7d-be0f-9a8b7c6d5e4f
+  author: Oscar Henriksson <oscar.henriksson91@gmail.com>
+  terum-category: workflow
 ---
 
 # Raw Inbox Memory
@@ -61,6 +70,6 @@ If capture fails, tell the user it was not persisted. Never pretend storage succ
 
 ## After capture
 
-Do not immediately turn the raw capture into curated wiki knowledge; Pasta ingests it as evidence for later synthesis. For an explicitly requested PARA update, follow the `personal-agent` skill.
+Do not immediately turn the raw capture into curated wiki knowledge; Pasta ingests it as evidence for later synthesis. For an explicitly requested PARA update, follow the vault's `llm-wiki` skill.
 
 Only run an immediate Pasta vault sync when the user needs the new capture to become searchable right away.

@@ -5,8 +5,10 @@ from pathlib import Path
 import sys
 
 SCRIPT = (
-    Path(__file__).parent.parent
+    Path(__file__).parent.parent.parent
+    / "agent"
     / "skills"
+    / "global"
     / "raw-inbox-memory"
     / "scripts"
     / "capture.py"
