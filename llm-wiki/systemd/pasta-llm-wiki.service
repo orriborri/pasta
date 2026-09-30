@@ -1,0 +1,13 @@
+[Unit]
+Description=Pasta LLM wiki upkeep (one bounded headless pass)
+After=network-online.target
+
+[Service]
+Type=oneshot
+Environment=PATH=%h/.local/bin:%h/code/pasta/target/release:/etc/profiles/per-user/%u/bin:%h/.nix-profile/bin:/run/current-system/sw/bin:/nix/var/nix/profiles/default/bin:/usr/bin:/bin
+Environment=WIKI_MAX_PAGES=5
+Environment=WIKI_PAGE_SIZE=100
+Environment=WIKI_BUDGET_USD=3
+ExecStart=%h/code/pasta/llm-wiki/run-upkeep.sh
+TimeoutStartSec=2h
+Nice=10

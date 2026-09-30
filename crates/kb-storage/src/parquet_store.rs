@@ -48,14 +48,8 @@ impl ParquetStore {
             return Ok(());
         }
 
-<<<<<<< HEAD
-        let batch_ts = Utc::now().format("%Y%m%d%H%M%S%9f").to_string();
-        let sequence = BATCH_SEQUENCE.fetch_add(1, Ordering::Relaxed);
-||||||| parent of 356da0e (fix(kb): page the change feed by ingestion time)
-        let batch_ts = chrono::Utc::now().format("%Y%m%d%H%M%S").to_string();
-=======
         let batch_ts = at.format(BATCH_TS_FORMAT).to_string();
->>>>>>> 356da0e (fix(kb): page the change feed by ingestion time)
+        let sequence = BATCH_SEQUENCE.fetch_add(1, Ordering::Relaxed);
 
         // Group by source + month
         let mut groups: std::collections::HashMap<String, Vec<&Record>> = std::collections::HashMap::new();
@@ -150,17 +144,6 @@ impl ParquetStore {
     /// # Errors
     /// Returns error if a Parquet file cannot be opened or parsed.
     pub fn read_all(&self) -> Result<Vec<Record>> {
-<<<<<<< HEAD
-        Ok(self.read_observed()?.into_iter().map(|(record, _)| record).collect())
-    }
-
-    /// Read immutable snapshots in ingestion order, including observation time.
-    ///
-    /// # Errors
-    /// Returns an error if any committed Parquet file cannot be read.
-    pub fn read_observed(&self) -> Result<Vec<(Record, DateTime<Utc>)>> {
-||||||| parent of 356da0e (fix(kb): page the change feed by ingestion time)
-=======
         Ok(self.read_all_ingested()?.into_iter().map(|(r, _)| r).collect())
     }
 
@@ -171,7 +154,6 @@ impl ParquetStore {
     /// # Errors
     /// Returns error if a Parquet file cannot be opened or parsed.
     pub fn read_all_ingested(&self) -> Result<Vec<(Record, DateTime<Utc>)>> {
->>>>>>> 356da0e (fix(kb): page the change feed by ingestion time)
         let mut records = Vec::new();
         let mut files = walkdir(&self.raw_dir)?;
         files.sort_by(|a, b| observed_at(a).cmp(&observed_at(b)).then_with(|| a.cmp(b)));
@@ -183,13 +165,7 @@ impl ParquetStore {
                 let reader = builder.build()?;
                 for batch in reader {
                     let batch = batch?;
-<<<<<<< HEAD
-                    records.extend(batch_to_records(&batch).into_iter().map(|r| (r, observed_at(&path))));
-||||||| parent of 356da0e (fix(kb): page the change feed by ingestion time)
-                    records.extend(batch_to_records(&batch));
-=======
                     records.extend(batch_to_records(&batch).into_iter().map(|r| (r, ingested)));
->>>>>>> 356da0e (fix(kb): page the change feed by ingestion time)
                 }
             }
         }
@@ -271,9 +247,10 @@ const LEGACY_BATCH_TS_FORMAT: &str = "%Y%m%d%H%M%S";
 
 fn ingested_at(path: &Path) -> DateTime<Utc> {
     let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or_default();
+    let timestamp = stem.split('-').next().unwrap_or_default();
     [BATCH_TS_FORMAT, LEGACY_BATCH_TS_FORMAT]
         .iter()
-        .find_map(|fmt| chrono::NaiveDateTime::parse_from_str(stem, fmt).ok())
+        .find_map(|fmt| chrono::NaiveDateTime::parse_from_str(timestamp, fmt).ok())
         .map(|t| t.and_utc())
         .or_else(|| fs::metadata(path).and_then(|m| m.modified()).ok().map(DateTime::<Utc>::from))
         .unwrap_or(DateTime::<Utc>::UNIX_EPOCH)

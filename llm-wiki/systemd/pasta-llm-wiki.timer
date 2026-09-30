@@ -1,0 +1,10 @@
+[Unit]
+Description=Nightly Pasta LLM wiki upkeep
+
+[Timer]
+OnCalendar=*-*-* 03:30
+RandomizedDelaySec=15m
+Persistent=true
+
+[Install]
+WantedBy=timers.target
