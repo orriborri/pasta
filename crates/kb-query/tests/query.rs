@@ -195,6 +195,41 @@ fn get_changes_pages_stably_with_opaque_cursor() {
 }
 
 #[test]
+fn get_changes_pages_by_ingestion_not_source_time() {
+    let tc = TempConfig::new();
+    let store = ParquetStore::new(&tc.config);
+    let future_event = rec("calendar-future", Source::Calendar, Kind::Event, at(2099, 1, 1));
+    store.write_at(&[future_event], at(2026, 9, 1)).unwrap();
+
+    let first = kb_query::get_changes(&tc.config, None, None, 10).unwrap();
+    assert_eq!(first.records.len(), 1);
+    let cursor = first.next_cursor.unwrap();
+
+    // Fetched later, but dated long before the cursor's record.
+    let late = rec("git-old-commit", Source::Git, Kind::Commit, at(2020, 1, 1));
+    store.write_at(&[late], at(2026, 9, 2)).unwrap();
+
+    let second = kb_query::get_changes(&tc.config, Some(&cursor), None, 10).unwrap();
+    let ids: Vec<_> = second.records.iter().map(|r| r.record_id.as_str()).collect();
+    assert_eq!(ids, ["git-old-commit"]);
+    assert!(second.records[0].ingested_at.starts_with("2026-09-02"));
+}
+
+#[test]
+fn get_changes_reports_newest_ingested_version() {
+    let tc = TempConfig::new();
+    let store = ParquetStore::new(&tc.config);
+    let mut v1 = rec("linear-AB-1", Source::Linear, Kind::Issue, at(2026, 1, 1));
+    store.write_at(&[v1.clone()], at(2026, 9, 1)).unwrap();
+    v1.title = "renamed".into();
+    store.write_at(&[v1], at(2026, 9, 1) + chrono::Duration::milliseconds(1)).unwrap();
+
+    let page = kb_query::get_changes(&tc.config, None, None, 10).unwrap();
+    assert_eq!(page.records.len(), 1);
+    assert_eq!(page.records[0].title, "renamed");
+}
+
+#[test]
 fn get_changes_rejects_malformed_cursor() {
     let tc = setup();
     assert!(kb_query::get_changes(&tc.config, Some("not-a-cursor"), None, 10).is_err());

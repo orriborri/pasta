@@ -1,0 +1,13 @@
+{
+  "enabledMcpjsonServers": [
+    "metabase",
+    "pasta-kb",
+    "playwright-mcp",
+    "code-review-graph"
+  ],
+  "permissions": {
+    "allow": [
+      "Read(//home/orre/Obsidian/Readpeak/**)"
+    ]
+  }
+}

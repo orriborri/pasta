@@ -137,6 +137,7 @@ pub struct ChangeHit {
     pub tags: Vec<String>,
     pub created_at: String,
     pub updated_at: String,
+    pub ingested_at: String,
 }
 
 /// A stable, paged view of records that changed after an opaque cursor.
@@ -341,9 +342,20 @@ pub async fn search(
 
 /// Return a stable page of the latest version of records after an opaque cursor.
 ///
+<<<<<<< HEAD
 /// The v2 cursor encodes the ingestion timestamp and record id. Records are
 /// deduplicated by id before paging so repeated Parquet snapshots do not produce
 /// duplicate wiki-maintenance work.
+||||||| parent of 356da0e (fix(kb): page the change feed by ingestion time)
+/// The cursor encodes the updated timestamp and record id. Records are
+/// deduplicated by id before paging so repeated Parquet snapshots do not produce
+/// duplicate wiki-maintenance work.
+=======
+/// Pages are ordered by ingestion time (when Pasta stored that record version)
+/// and record id. Source timestamps are not usable here: a late-fetched record can
+/// carry an old `updated_at`, and a calendar event a future one, and either would
+/// be skipped by a cursor keyed on them.
+>>>>>>> 356da0e (fix(kb): page the change feed by ingestion time)
 ///
 /// # Errors
 /// Returns an error if Parquet cannot be read or the cursor is malformed.
@@ -356,11 +368,32 @@ pub fn get_changes(
     use std::collections::HashMap;
 
     let parquet = ParquetStore::new(config);
+<<<<<<< HEAD
     let mut latest: HashMap<String, (Record, DateTime<Utc>)> = HashMap::new();
     for (record, observed) in parquet.read_observed()? {
         latest.insert(kb_storage::parquet_store::current_key(&record), (record, observed));
+||||||| parent of 356da0e (fix(kb): page the change feed by ingestion time)
+    let mut latest: HashMap<String, Record> = HashMap::new();
+    for record in parquet.read_all()? {
+        let replace = latest
+            .get(&record.id)
+            .is_none_or(|current| record.updated_at > current.updated_at);
+        if replace {
+            latest.insert(record.id.clone(), record);
+        }
+=======
+    let mut latest: HashMap<String, (Record, DateTime<Utc>)> = HashMap::new();
+    for (record, ingested) in parquet.read_all_ingested()? {
+        let replace = latest.get(&record.id).is_none_or(|(current, current_ingested)| {
+            (ingested, record.updated_at) > (*current_ingested, current.updated_at)
+        });
+        if replace {
+            latest.insert(record.id.clone(), (record, ingested));
+        }
+>>>>>>> 356da0e (fix(kb): page the change feed by ingestion time)
     }
 
+<<<<<<< HEAD
     // v1 cursors used source timestamps and could skip late arrivals. Validate
     // them but replay once when migrating to ingestion-ordered v2 cursors.
     let after = if let Some(value) = cursor.and_then(|value| value.strip_prefix("v2|")) {
@@ -377,11 +410,54 @@ pub fn get_changes(
             observed > at || (observed == at && record.id.as_str() > id.as_str())
         })).collect();
     records.sort_by(|(a, at), (b, bt)| at.cmp(bt).then_with(|| a.id.cmp(&b.id)));
+||||||| parent of 356da0e (fix(kb): page the change feed by ingestion time)
+    let after = cursor.map(parse_change_cursor).transpose()?;
+    let mut records: Vec<Record> = latest
+        .into_values()
+        .filter(|record| source_filter.is_none_or(|source| record.source.to_string() == source))
+        .filter(|record| {
+            after.as_ref().is_none_or(|(at, id)| {
+                record.updated_at > *at || (record.updated_at == *at && record.id.as_str() > id.as_str())
+            })
+        })
+        .collect();
+
+    records.sort_by(|a, b| {
+        a.updated_at
+            .cmp(&b.updated_at)
+            .then_with(|| a.id.cmp(&b.id))
+    });
+
+=======
+    let after = cursor.map(parse_change_cursor).transpose()?;
+    let mut records: Vec<(Record, DateTime<Utc>)> = latest
+        .into_values()
+        .filter(|(record, _)| source_filter.is_none_or(|source| record.source.to_string() == source))
+        .filter(|(record, ingested)| {
+            after.as_ref().is_none_or(|(at, id)| {
+                *ingested > *at || (*ingested == *at && record.id.as_str() > id.as_str())
+            })
+        })
+        .collect();
+
+    records.sort_by(|(a, a_at), (b, b_at)| a_at.cmp(b_at).then_with(|| a.id.cmp(&b.id)));
+
+>>>>>>> 356da0e (fix(kb): page the change feed by ingestion time)
     let limit = limit.clamp(1, 1000);
     let has_more = records.len() > limit;
     records.truncate(limit);
+<<<<<<< HEAD
     let next_cursor = records.last()
         .map(|(record, observed)| format!("v2|{}|{}", observed.to_rfc3339(), record.id))
+||||||| parent of 356da0e (fix(kb): page the change feed by ingestion time)
+    let next_cursor = records
+        .last()
+        .map(change_cursor)
+=======
+    let next_cursor = records
+        .last()
+        .map(|(record, ingested)| change_cursor(record, *ingested))
+>>>>>>> 356da0e (fix(kb): page the change feed by ingestion time)
         .or_else(|| cursor.map(str::to_string));
     // Entity extraction augments the change envelope; evidence bodies remain
     // the original source snapshots returned by get_evidence.
@@ -390,7 +466,7 @@ pub fn get_changes(
 
     let records = records
         .into_iter()
-        .map(|record| ChangeHit {
+        .map(|(record, ingested)| ChangeHit {
             record_id: record.id,
             source: record.source.to_string(),
             kind: kind_tag(record.kind).to_string(),
@@ -403,6 +479,7 @@ pub fn get_changes(
             tags: record.tags,
             created_at: record.created_at.to_rfc3339(),
             updated_at: record.updated_at.to_rfc3339(),
+            ingested_at: ingested.to_rfc3339(),
         })
         .collect();
 
@@ -426,6 +503,16 @@ fn parse_change_cursor(cursor: &str) -> Result<(DateTime<Utc>, String)> {
     Ok((updated_at, record_id.to_string()))
 }
 
+<<<<<<< HEAD
+||||||| parent of 356da0e (fix(kb): page the change feed by ingestion time)
+fn change_cursor(record: &Record) -> String {
+    format!("{}|{}", record.updated_at.to_rfc3339(), record.id)
+}
+=======
+fn change_cursor(record: &Record, ingested: DateTime<Utc>) -> String {
+    format!("{}|{}", ingested.to_rfc3339(), record.id)
+}
+>>>>>>> 356da0e (fix(kb): page the change feed by ingestion time)
 
 /// Whether a backing record exists in Parquet for the entity. Matches the
 /// record whose deterministic id or thread/native id corresponds to the ref.

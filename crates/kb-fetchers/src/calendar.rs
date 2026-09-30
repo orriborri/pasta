@@ -102,6 +102,10 @@ fn parse_records(json: &str) -> Vec<Record> {
 fn event_to_record(event: &CalEvent) -> Record {
     let id = Record::make_id(Source::Calendar, &event.id);
     let created = parse_event_time(&event.start);
+    // The change feed orders by updated_at, so it must be the last edit, never a future start time.
+    let updated = event.updated.as_deref()
+        .and_then(|u| DateTime::parse_from_rfc3339(u).ok())
+        .map_or_else(|| created.min(Utc::now()), |d| d.with_timezone(&Utc));
     let title = event.summary.clone().unwrap_or_default();
     let content = event.description.clone().unwrap_or_else(|| title.clone());
 
@@ -127,7 +131,7 @@ fn event_to_record(event: &CalEvent) -> Record {
         author,
         participants,
         created_at: created,
-        updated_at: created,
+        updated_at: updated,
         url: event.html_link.clone().unwrap_or_default(),
         thread_id: String::new(),
         entities: vec![],
@@ -162,6 +166,7 @@ struct CalEvent {
     summary: Option<String>,
     description: Option<String>,
     status: Option<String>,
+    updated: Option<String>,
     start: EventTime,
     organizer: Option<Person>,
     attendees: Option<Vec<Attendee>>,
@@ -247,6 +252,20 @@ mod tests {
         // responseStatus of the "self" attendee is surfaced as a tag.
         assert!(meeting.tags.contains(&"needsAction".to_string()));
         assert_eq!(meeting.created_at, "2026-06-20T09:00:00Z".parse::<DateTime<Utc>>().unwrap());
+    }
+
+    #[test]
+    fn updated_at_is_last_edit_not_future_start() {
+        let json = r#"{"events": [
+            {"id": "future", "status": "confirmed", "updated": "2026-09-01T08:00:00Z",
+             "start": {"dateTime": "2099-01-01T09:00:00Z"}},
+            {"id": "future-no-updated", "status": "confirmed",
+             "start": {"dateTime": "2099-01-01T09:00:00Z"}}
+        ]}"#;
+        let records = parse_records(json);
+        assert_eq!(records[0].updated_at, "2026-09-01T08:00:00Z".parse::<DateTime<Utc>>().unwrap());
+        assert_eq!(records[0].created_at, "2099-01-01T09:00:00Z".parse::<DateTime<Utc>>().unwrap());
+        assert!(records[1].updated_at <= Utc::now());
     }
 
     #[test]
