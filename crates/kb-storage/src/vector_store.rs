@@ -74,26 +74,25 @@ impl VectorStore {
             Arc::new(vector_array) as ArrayRef,
         ])?;
 
-        // Create or overwrite table
+        // Create the table or upsert into the existing compatible table.
         let tables = db.table_names().execute().await?;
         if tables.contains(&TABLE_NAME.to_string()) {
             let table = db.open_table(TABLE_NAME).execute().await?;
-            // If schema changed (missing created_at or url), drop and recreate
+            // Require an explicit migration for incompatible schemas.
             let existing_schema = table.schema().await?;
             if existing_schema.field_with_name("created_at").is_err()
                 || existing_schema.field_with_name("url").is_err() {
                 anyhow::bail!("Vector index schema requires migration; run `kb reindex` before syncing");
-            } else {
-                // Delete existing records by ID for true upsert
-                let id_filter = ids.iter()
-                    .map(|id| format!("'{}'", id.replace('\'', "''")))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                if !id_filter.is_empty() {
-                    table.delete(&format!("id IN ({id_filter})")).await?;
-                }
-                table.add(vec![batch]).execute().await?;
             }
+            // Delete existing records by ID for true upsert
+            let id_filter = ids.iter()
+                .map(|id| format!("'{}'", id.replace('\'', "''")))
+                .collect::<Vec<_>>()
+                .join(", ");
+            if !id_filter.is_empty() {
+                table.delete(&format!("id IN ({id_filter})")).await?;
+            }
+            table.add(vec![batch]).execute().await?;
         } else {
             db.create_table(TABLE_NAME, vec![batch]).execute().await?;
         }
