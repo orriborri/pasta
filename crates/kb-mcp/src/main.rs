@@ -1,3 +1,7 @@
+// rmcp's tool_router generates an async ServerHandler implementation even
+// when dispatching synchronous tools; that signature is owned by the framework.
+#![allow(clippy::unused_async_trait_impl)]
+
 use rmcp::handler::server::wrapper::{Json, Parameters};
 use rmcp::{schemars, tool, tool_router, transport::stdio, ErrorData, ServiceExt};
 
@@ -101,6 +105,8 @@ fn query_err(e: &anyhow::Error) -> ErrorData {
 struct KbServer;
 
 #[tool_router(server_handler)]
+// rmcp routes tools through instance methods, including stateless handlers.
+#[allow(clippy::unused_self)]
 impl KbServer {
     #[tool(
         description = "Search the knowledge base using hybrid search (semantic + full-text). Returns structured hits, each with record_id, source, title, snippet, url, timestamp, and score."
