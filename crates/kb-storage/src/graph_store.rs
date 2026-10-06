@@ -119,6 +119,34 @@ impl GraphStore {
         Ok(())
     }
 
+    /// Replace the current relations for these evidence IDs, including records
+    /// whose new version has no relations. Historical snapshots stay in Parquet.
+    ///
+    /// # Errors
+    /// Returns an error if the transaction cannot be committed.
+    ///
+    /// # Panics
+    /// Panics if the connection mutex is poisoned.
+    pub fn replace_records(&self, records: &[Record], relations: &[Relation]) -> Result<()> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        for record in records {
+            tx.execute("DELETE FROM relations WHERE evidence_record_id = ?1", [&record.id])?;
+            for entity in &record.entities {
+                if let Ok(entity) = entity.parse::<EntityRef>() {
+                    insert_entity(&tx, &entity)?;
+                }
+            }
+        }
+        for relation in relations {
+            insert_entity(&tx, &relation.subject)?;
+            insert_entity(&tx, &relation.object)?;
+            insert_relation(&tx, relation)?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
     /// Number of stored entities.
     ///
     /// # Errors

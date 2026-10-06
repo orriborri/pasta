@@ -7,7 +7,7 @@ use crate::util::log;
 /// index into search stores, and generate the daily note. Called by both the
 /// scheduler and the ForceFetch command.
 pub async fn run(event_tx: Option<EventTx>) {
-    let sources = &["gmail", "linear", "gitlab", "calendar", "slack"];
+    let sources = &["gmail", "linear", "gitlab", "calendar", "slack", "vault"];
 
     // Fetch records using kb-fetchers (single pass) with timeout
     let outcome = match tokio::time::timeout(

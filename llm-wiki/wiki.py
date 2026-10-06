@@ -9,11 +9,14 @@ JSON can drive the semantic step.
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
+import fcntl
 import hashlib
 import json
 import os
 import re
 import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterable
@@ -41,11 +44,65 @@ def write_json(data: Any, path: Path | None = None) -> None:
         sys.stdout.write(text)
     else:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text, encoding="utf-8")
+        atomic_write(path, text)
+
+
+def digest(data: Any) -> str:
+    return hashlib.sha256(json.dumps(data, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+
+
+def file_hash(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def checked_path(wiki: Path, relative: str) -> Path:
+    """Reject symlinks in every component, including dangling symlinks."""
+    root = wiki.resolve()
+    target = root
+    for part in PurePosixPath(relative).parts:
+        if part in {"..", "/"}:
+            raise WikiError("path escapes the wiki")
+        target = target / part
+        if target.is_symlink():
+            raise WikiError(f"symlink inside wiki: {relative}")
+    if not target.resolve().is_relative_to(root):
+        raise WikiError("path escapes the wiki")
+    return target
+
+
+def atomic_write(path: Path, text: str) -> None:
+    descriptor, temporary = tempfile.mkstemp(prefix=".wiki-", dir=path.parent)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+        directory = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+@contextmanager
+def wiki_lock(wiki: Path):
+    directory = checked_path(wiki, STATE_DIR)
+    directory.mkdir(parents=True, exist_ok=True)
+    path = checked_path(wiki, f"{STATE_DIR}/lock")
+    descriptor = os.open(path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(descriptor)
 
 
 def state_path(wiki: Path) -> Path:
-    return wiki / STATE_DIR / STATE_FILE
+    return checked_path(wiki, f"{STATE_DIR}/{STATE_FILE}")
 
 
 def load_state(wiki: Path) -> dict[str, Any]:
@@ -116,6 +173,7 @@ def iter_markdown(wiki: Path) -> Iterable[Path]:
 def index_pages(wiki: Path) -> list[PageIndex]:
     pages: list[PageIndex] = []
     for path in iter_markdown(wiki):
+        path = checked_path(wiki, path.relative_to(wiki).as_posix())
         text = path.read_text(encoding="utf-8")
         meta = parse_frontmatter(text)
         entities_value = meta.get("entities", [])
@@ -187,6 +245,9 @@ def build_plan(wiki: Path, changes: Any) -> dict[str, Any]:
         if not record_id:
             continue
         entities = canonical_entities(record)
+        # A removed mention still requires refreshing the page that cited this
+        # record previously, even though its entity is absent from the new data.
+        entities = sorted(set(entities) | {entity for page in pages if record_id in page.evidence for entity in page.entities})
         if not entities:
             entities = [f"record:{record_id}"]
         for entity in entities:
@@ -218,22 +279,28 @@ def build_plan(wiki: Path, changes: Any) -> dict[str, Any]:
                 "existing_evidence_record_ids": existing_evidence,
                 "candidate_pages": candidate_pages,
                 "records": bucket["records"],
+                "page_hashes": {page: file_hash(checked_path(wiki, page)) for page in candidate_pages},
             }
         )
 
-    return {
+    plan = {
         "version": 1,
+        "start_cursor": load_state(wiki).get("cursor"),
+        "changes_sha256": digest(changes),
         "next_cursor": next_cursor,
         "has_more": has_more,
         "jobs": jobs,
+        "existing_page_hashes": {page.path: file_hash(checked_path(wiki, page.path)) for page in pages},
     }
+    plan["plan_id"] = digest(plan)
+    return plan
 
 
 def safe_page_path(page: str) -> PurePosixPath:
     p = PurePosixPath(page)
-    if p.is_absolute() or ".." in p.parts or not p.parts or p.suffix.lower() != ".md":
+    if p.is_absolute() or ".." in p.parts or "\\" in page or not p.parts or p.suffix.lower() != ".md":
         raise WikiError(f"unsafe wiki page path: {page!r}")
-    if p.parts[0] == STATE_DIR:
+    if STATE_DIR in p.parts:
         raise WikiError(f"page may not be written under {STATE_DIR}/")
     return p
 
@@ -285,9 +352,18 @@ def validate_patch(wiki: Path, plan: dict[str, Any], patch: dict[str, Any]) -> l
             raise WikiError(f"citations missing from patch.evidence_record_ids: {sorted(missing_declarations)}")
 
         allowed = set(job.get("evidence_record_ids", [])) | set(job.get("existing_evidence_record_ids", []))
-        target = wiki / Path(*page.parts)
+        target = checked_path(wiki, page.as_posix())
         if target.exists():
-            allowed |= citations(target.read_text(encoding="utf-8"))
+            current = file_hash(target)
+            normalized = content if content.endswith("\n") else content + "\n"
+            expected = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+            if page.as_posix() not in job.get("candidate_pages", []):
+                if page.as_posix() in plan.get("existing_page_hashes", {}) or current != expected:
+                    raise WikiError("job may not overwrite an unrelated existing page")
+            elif current != job.get("page_hashes", {}).get(page.as_posix()) and current != expected:
+                raise WikiError("page changed since planning; rebuild the plan before applying")
+        elif page.as_posix() in job.get("page_hashes", {}):
+            raise WikiError("planned page was deleted; rebuild the plan before applying")
         unsupported = declared_set - allowed
         if unsupported:
             raise WikiError(f"patch cites evidence outside this job/existing page: {sorted(unsupported)}")
@@ -296,20 +372,83 @@ def validate_patch(wiki: Path, plan: dict[str, Any], patch: dict[str, Any]) -> l
     return errors
 
 
+def assert_plan_current(wiki: Path, plan: dict[str, Any]) -> None:
+    material = {key: value for key, value in plan.items() if key != "plan_id"}
+    if plan.get("plan_id") != digest(material):
+        raise WikiError("plan identity is missing or invalid; rebuild the plan")
+    if plan.get("start_cursor") != load_state(wiki).get("cursor"):
+        raise WikiError("wiki cursor changed since planning; rebuild the plan")
+
+
+def record_completion(wiki: Path, plan: dict[str, Any], job_id: str, receipt: dict[str, Any]) -> None:
+    state = load_state(wiki)
+    state.setdefault("completed", {}).setdefault(plan["plan_id"], {})[job_id] = receipt
+    save_state(wiki, state)
+
+
 def apply_patch(wiki: Path, plan: dict[str, Any], patch: dict[str, Any]) -> Path:
-    errors = validate_patch(wiki, plan, patch)
-    if errors:
-        raise WikiError("; ".join(errors))
-    page = safe_page_path(patch["page"])
-    target = wiki / Path(*page.parts)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    content = patch["content"]
-    if not content.endswith("\n"):
-        content += "\n"
-    tmp = target.with_suffix(target.suffix + ".tmp")
-    tmp.write_text(content, encoding="utf-8")
-    os.replace(tmp, target)
-    return target
+    with wiki_lock(wiki):
+        assert_plan_current(wiki, plan)
+        job = find_job(plan, patch.get("job_id", ""))
+        page = safe_page_path(patch.get("page", ""))
+        target = checked_path(wiki, page.as_posix())
+        content = patch.get("content", "")
+        if not isinstance(content, str):
+            raise WikiError("patch.content must be Markdown")
+        if not content.endswith("\n"):
+            content += "\n"
+        expected = hashlib.sha256(content.encode("utf-8")).hexdigest()
+        receipts = load_state(wiki).get("completed", {}).get(plan["plan_id"], {})
+        previous = receipts.get(job["job_id"], {})
+        if previous.get("patch_sha256") == digest(patch) and target.exists() and file_hash(target) == expected:
+            return target
+        errors = validate_patch(wiki, plan, patch)
+        if errors:
+            raise WikiError("; ".join(errors))
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target = checked_path(wiki, page.as_posix())
+        # Repeat validation under the lock immediately before replacing a file.
+        errors = validate_patch(wiki, plan, patch)
+        if errors:
+            raise WikiError("; ".join(errors))
+        atomic_write(target, content)
+        record_completion(wiki, plan, job["job_id"], {
+            "page": page.as_posix(), "sha256": expected, "patch_sha256": digest(patch),
+        })
+        return target
+
+
+def skip_job(wiki: Path, plan: dict[str, Any], job_id: str, reason: str) -> None:
+    if not reason.strip():
+        raise WikiError("skipping a job requires a reason")
+    with wiki_lock(wiki):
+        assert_plan_current(wiki, plan)
+        find_job(plan, job_id)
+        record_completion(wiki, plan, job_id, {"skipped": True, "reason": reason})
+
+
+def advance(wiki: Path, plan: dict[str, Any], changes: Any) -> str:
+    with wiki_lock(wiki):
+        assert_plan_current(wiki, plan)
+        if plan.get("changes_sha256") != digest(changes):
+            raise WikiError("changes input does not match the completed plan")
+        _, cursor, _ = normalize_change_page(changes)
+        if cursor is None:
+            raise WikiError("changes input has no next_cursor")
+        state = load_state(wiki)
+        completed = state.get("completed", {}).get(plan["plan_id"], {})
+        missing = [job["job_id"] for job in plan["jobs"] if job["job_id"] not in completed]
+        if missing:
+            raise WikiError(f"cannot advance past unfinished jobs: {missing}")
+        for receipt in completed.values():
+            if not receipt.get("skipped"):
+                path = checked_path(wiki, receipt["page"])
+                if not path.exists() or file_hash(path) != receipt["sha256"]:
+                    raise WikiError("an applied page changed before cursor advancement; rebuild the plan")
+        state["cursor"] = cursor
+        state.pop("completed", None)
+        save_state(wiki, state)
+        return cursor
 
 
 def audit(wiki: Path) -> dict[str, Any]:
@@ -387,17 +526,14 @@ def cmd_apply(args: argparse.Namespace) -> int:
 
 
 def cmd_advance(args: argparse.Namespace) -> int:
-    wiki = args.wiki.resolve()
-    data = read_json(args.changes)
-    _, cursor, has_more = normalize_change_page(data)
-    if has_more and not args.allow_partial:
-        raise WikiError("changes page has_more=true; process all pages before advancing the durable cursor")
-    if cursor is None:
-        raise WikiError("changes input has no next_cursor")
-    state = load_state(wiki)
-    state["cursor"] = cursor
-    save_state(wiki, state)
+    cursor = advance(args.wiki.resolve(), read_json(args.plan), read_json(args.changes))
     write_json({"cursor": cursor})
+    return 0
+
+
+def cmd_skip(args: argparse.Namespace) -> int:
+    skip_job(args.wiki.resolve(), read_json(args.plan), args.job_id, args.reason)
+    write_json({"skipped": args.job_id})
     return 0
 
 
@@ -440,8 +576,15 @@ def parser() -> argparse.ArgumentParser:
     x = sub.add_parser("advance", help="advance durable cursor after a completed change page")
     x.add_argument("--wiki", type=Path, required=True)
     x.add_argument("--changes", type=Path, required=True)
-    x.add_argument("--allow-partial", action="store_true", help="allow advancing when has_more=true (normally unsafe)")
+    x.add_argument("--plan", type=Path, required=True)
     x.set_defaults(func=cmd_advance)
+
+    x = sub.add_parser("skip", help="complete a job without a page change, with an explicit reason")
+    x.add_argument("--wiki", type=Path, required=True)
+    x.add_argument("--plan", type=Path, required=True)
+    x.add_argument("--job-id", required=True)
+    x.add_argument("--reason", required=True)
+    x.set_defaults(func=cmd_skip)
 
     x = sub.add_parser("audit", help="emit deterministic wiki hygiene/evidence-reference report")
     x.add_argument("--wiki", type=Path, required=True)

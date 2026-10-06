@@ -2790,6 +2790,7 @@ dependencies = [
  "dirs",
  "rusqlite",
  "serde",
+ "serde_json",
  "sha2",
 ]
 
@@ -2866,6 +2867,7 @@ dependencies = [
  "reqwest",
  "rusqlite",
  "serde",
+ "serde_json",
  "tantivy",
  "tokio",
  "tracing",

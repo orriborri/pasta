@@ -110,3 +110,36 @@ internal_slack = true
 - `gog` binary for Gmail (or `GOG_PATH` env)
 - `linear-api` binary for Linear (or `LINEAR_API_PATH` env)
 - OpenAI API key at `~/.config/openai/api_key` (or `OPENAI_API_KEY` env) — falls back to local Ollama
+
+## Evidence reliability and migration
+
+Fetched records are atomically saved to Parquet before source cursors commit.
+The raw journal preserves full bodies and metadata; normalization and entity
+extraction build one derived record per source ID without thread merging or
+heuristic truncation. Index completion hashes are written only after text,
+vector, and graph writes succeed. Every sync revisits unfinished durable records,
+even if the source returns no new data. The scheduled daemon also syncs the vault.
+
+`read_all` exposes snapshot history, `read_latest` resolves the most recent
+snapshot of each ID, and `read_current` additionally retires legacy vault IDs
+when their files are captured under relative-path IDs. Existing legacy IDs remain
+resolvable as historical evidence; active search indexes remove superseded IDs.
+Metadata changes invalidate completion hashes. Graph edges are replaced per
+updated evidence record, so removed mentions do not remain current relations.
+
+The change-feed cursor now uses ingestion time (`v2|...`), not source timestamps.
+Existing v1 cursors trigger a one-time replay, preventing missed late arrivals.
+`get_evidence` retains `snippet` and adds complete `content`, `updated_at`, and a
+`version_hash` for inspecting the resolved snapshot. File deletions and remote
+service edits are only reflected when their fetcher reports them; this change
+does not introduce source tombstones or webhook ingestion.
+
+After upgrading, run `kb sync` and optionally `kb reindex` to rebuild indexes.
+Previously discarded source text cannot be recovered from old Parquet snapshots;
+refetch the relevant source history where available. Gmail ingestion still stores
+the snippets returned by its fetcher, rather than fetching complete email bodies.
+The lossless guarantee starts at the records supplied by each fetcher.
+
+Atomic Parquet writes and wiki durability checks target local POSIX filesystems.
+Keep maintenance to one daemon/CLI writer at a time; scheduling single-flight
+protection does not coordinate separate CLI processes.

@@ -26,7 +26,7 @@ impl VaultFetcher {
         let tasks_dir = layout.tasks();
         if tasks_dir.exists() {
             for path in walk_md(&tasks_dir) {
-                if let Some(r) = Self::file_to_record(&path, "task") {
+                if let Some(r) = self.file_to_record(&path, "task") {
                     records.push(r);
                 }
             }
@@ -36,7 +36,7 @@ impl VaultFetcher {
         let people_dir = layout.people();
         if people_dir.exists() {
             for path in walk_md(&people_dir) {
-                if let Some(r) = Self::file_to_record(&path, "person") {
+                if let Some(r) = self.file_to_record(&path, "person") {
                     records.push(r);
                 }
             }
@@ -48,7 +48,7 @@ impl VaultFetcher {
         let raw_inbox_dir = layout.raw_inbox();
         if raw_inbox_dir.exists() {
             for path in walk_md(&raw_inbox_dir) {
-                if let Some(r) = Self::file_to_record(&path, "raw-inbox") {
+                if let Some(r) = self.file_to_record(&path, "raw-inbox") {
                     records.push(r);
                 }
             }
@@ -58,7 +58,7 @@ impl VaultFetcher {
         let projects_dir = layout.projects();
         if projects_dir.exists() {
             for path in walk_md(&projects_dir) {
-                if let Some(r) = Self::file_to_record(&path, "project") {
+                if let Some(r) = self.file_to_record(&path, "project") {
                     records.push(r);
                 }
             }
@@ -69,7 +69,7 @@ impl VaultFetcher {
         for (dir, tag) in [(layout.areas(), "area"), (layout.resources(), "resource")] {
             if dir.exists() {
                 for path in walk_md(&dir) {
-                    if let Some(r) = Self::file_to_record(&path, tag) {
+                    if let Some(r) = self.file_to_record(&path, tag) {
                         records.push(r);
                     }
                 }
@@ -80,12 +80,24 @@ impl VaultFetcher {
         Ok(records)
     }
 
-    fn file_to_record(path: &Path, tag: &str) -> Option<Record> {
+    fn file_to_record(&self, path: &Path, tag: &str) -> Option<Record> {
         let content = fs::read_to_string(path).ok()?;
         if content.trim().is_empty() { return None; }
 
         let stem = path.file_stem()?.to_string_lossy().to_string();
-        let id = Record::make_id(Source::Vault, &format!("{}-{}", tag, slug(&stem)));
+        // Use the relative path, not the basename: separate folders can contain
+        // identically named notes. Retain readable IDs without slug collisions.
+        let relative = path.strip_prefix(&self.vault_path).ok()?.to_string_lossy()
+            .replace(std::path::MAIN_SEPARATOR, "/");
+        // Citation IDs must not contain whitespace or Markdown delimiters.
+        let encoded: String = relative.bytes().map(|byte| {
+            if byte.is_ascii_alphanumeric() || matches!(byte, b'/' | b'-' | b'_' | b'.') {
+                char::from(byte).to_string()
+            } else {
+                format!("%{byte:02X}")
+            }
+        }).collect();
+        let id = Record::make_id(Source::Vault, &encoded);
 
         let modified = fs::metadata(path).ok()
             .and_then(|m| m.modified().ok()).map_or_else(Utc::now, DateTime::<Utc>::from);
@@ -123,16 +135,6 @@ fn walk_md(dir: &Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
     walk(dir, &mut files);
     files
-}
-
-fn slug(s: &str) -> String {
-    s.chars()
-        .map(|c| if c.is_alphanumeric() || c == '-' { c.to_ascii_lowercase() } else { '-' })
-        .collect::<String>()
-        .split('-')
-        .filter(|p| !p.is_empty())
-        .collect::<Vec<_>>()
-        .join("-")
 }
 
 
@@ -176,9 +178,24 @@ mod tests {
 
         assert_eq!(raw.len(), 1);
         assert_eq!(raw[0].title, "capture");
+        assert!(!raw[0].id.contains(' '));
+        assert!(raw[0].id.contains("0.%20Inbox/Raw/"));
         assert!(raw[0].content.contains("prefers concise updates"));
         assert!(!records.iter().any(|record| record.title == "operational"));
 
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn same_basename_in_different_directories_has_distinct_identity() {
+        let dir = temp_vault();
+        std::fs::create_dir_all(dir.join("Tasks/A")).unwrap();
+        std::fs::create_dir_all(dir.join("Tasks/B")).unwrap();
+        std::fs::write(dir.join("Tasks/A/Test.md"), "First task").unwrap();
+        std::fs::write(dir.join("Tasks/B/Test.md"), "Second task").unwrap();
+        let records = VaultFetcher::new(&dir).fetch().unwrap();
+        assert_eq!(records.len(), 2);
+        assert_ne!(records[0].id, records[1].id);
         let _ = std::fs::remove_dir_all(dir);
     }
 }

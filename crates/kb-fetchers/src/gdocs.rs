@@ -2,7 +2,7 @@ use anyhow::Result;
 use chrono::{DateTime, Utc};
 use kb_core::{Kind, Record, Source, SyncState};
 use serde::Deserialize;
-use tracing::{info, warn};
+use tracing::info;
 
 /// Fetches Google Docs via the `gog` CLI.
 ///
@@ -11,7 +11,6 @@ use tracing::{info, warn};
 /// so no token handling lives here.
 pub struct GdocsFetcher {
     lookback_days: i64,
-    max_docs: usize,
 }
 
 impl Default for GdocsFetcher {
@@ -23,13 +22,13 @@ impl Default for GdocsFetcher {
 impl GdocsFetcher {
     #[must_use]
     pub const fn new() -> Self {
-        Self { lookback_days: 30, max_docs: 200 }
+        Self { lookback_days: 30 }
     }
 
     /// Fetch Google Docs modified since the last cursor and export them to Markdown.
     ///
-    /// Pagination follows Drive's `nextPageToken` up to `max_docs`. A doc that
-    /// fails to export is logged and skipped rather than aborting the whole sync.
+    /// Pagination follows Drive's `nextPageToken` until all pages have been read. An export failure
+    /// aborts this source without committing its cursor.
     ///
     /// # Errors
     /// Returns an error if the `gog drive ls` invocation cannot be spawned.
@@ -39,8 +38,9 @@ impl GdocsFetcher {
         });
 
         // Drive query: only Google Docs changed since the cursor.
+        let upper_bound = Utc::now().to_rfc3339();
         let query = format!(
-            "mimeType='application/vnd.google-apps.document' and modifiedTime > '{since}'"
+            "mimeType='application/vnd.google-apps.document' and modifiedTime > '{since}' and modifiedTime <= '{upper_bound}'"
         );
 
         let files = self.list_docs(&query).await?;
@@ -48,28 +48,19 @@ impl GdocsFetcher {
 
         let mut records = Vec::with_capacity(files.len());
         for file in &files {
-            match export_doc(&file.id).await {
-                Ok(content) if !content.trim().is_empty() => {
-                    records.push(file_to_record(file, content));
-                }
-                Ok(_) => warn!(doc = %file.id, "gdoc export empty, skipped"),
-                Err(e) => {
-                    warn!(doc = %file.id, error = %e, "gdoc export failed, using metadata-only");
-                    let title = file.name.as_deref().unwrap_or("Untitled");
-                    let content = format!("[Large document — export limit exceeded]\n\nTitle: {title}");
-                    records.push(file_to_record(file, content));
-                }
-            }
+            // A failed export must remain retryable, never become fabricated
+            // metadata-only evidence with an advanced cursor.
+            let content = export_doc(&file.id).await?;
+            records.push(file_to_record(file, content));
         }
 
-        let now = Utc::now().to_rfc3339();
-        state.update_window("gdocs_forward", &since, &now).ok();
+        state.update_window("gdocs_forward", &since, &upper_bound)?;
 
         info!(count = records.len(), "gdocs exported");
         Ok(records)
     }
 
-    /// List matching Docs, following `nextPageToken` up to `max_docs`.
+    /// List matching Docs, following `nextPageToken` until all pages have been read.
     async fn list_docs(&self, query: &str) -> Result<Vec<DriveFile>> {
         const FIELDS: &str = "files(id,name,mimeType,modifiedTime,createdTime,owners(displayName,emailAddress),webViewLink),nextPageToken";
 
@@ -101,13 +92,9 @@ impl GdocsFetcher {
             }
 
             let json = String::from_utf8_lossy(&output.stdout);
-            let resp: DriveResponse = serde_json::from_str(&json).unwrap_or_default();
+            let resp: DriveResponse = serde_json::from_str(&json)?;
 
             files.extend(resp.files);
-            if files.len() >= self.max_docs {
-                files.truncate(self.max_docs);
-                break;
-            }
 
             match resp.next_page_token {
                 Some(token) if !token.is_empty() => page_token = Some(token),

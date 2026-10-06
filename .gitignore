@@ -17,3 +17,7 @@
 
 # Ralph execution state
 .ralph/
+
+# Python test/runtime caches
+__pycache__/
+*.pyc

@@ -74,10 +74,12 @@ impl CalendarFetcher {
         }
 
         let json = String::from_utf8_lossy(&output.stdout);
+        // Malformed API output is a failure, not an authoritative empty snapshot.
+        let _: GogResponse = serde_json::from_str(&json)?;
         let records = parse_records(&json);
 
         let now = Utc::now().to_rfc3339();
-        state.update_window("calendar_forward", &since, &now).ok();
+        state.update_window("calendar_forward", &since, &now)?;
 
         info!(count = records.len(), "calendar events fetched");
         Ok(records)

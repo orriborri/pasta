@@ -32,11 +32,11 @@ impl GmailFetcher {
             });
 
         let query = format!("after:{since} -category:promotions -category:social");
-        let threads = fetch_threads(&query).await;
+        let threads = fetch_threads(&query).await?;
         info!(count = threads.len(), "gmail threads fetched");
 
         let now = Utc::now().format("%Y/%m/%d").to_string();
-        state.update_window("gmail_forward", &since, &now).ok();
+        state.update_window("gmail_forward", &since, &now)?;
 
         let records = threads.into_iter().map(|t| {
             let id = Record::make_id(Source::Gmail, &slug(&format!("{}-{}", t.date, t.subject)));
@@ -65,19 +65,15 @@ impl GmailFetcher {
     }
 }
 
-async fn fetch_threads(query: &str) -> Vec<GmailThread> {
+async fn fetch_threads(query: &str) -> Result<Vec<GmailThread>> {
     let output = tokio::process::Command::new("gog")
         .args(["gmail", "search", query, "--json", "--all"])
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .output()
-        .await
-        .ok();
-    let Some(output) = output else { return vec![] };
-    if !output.status.success() { return vec![]; }
-    let json = String::from_utf8_lossy(&output.stdout);
-    let result: SearchResult = serde_json::from_str(&json).unwrap_or(SearchResult { threads: None });
-    result.threads.unwrap_or_default()
+        .output().await?;
+    if !output.status.success() {
+        anyhow::bail!("gog gmail search failed: {}", String::from_utf8_lossy(&output.stderr));
+    }
+    let result: SearchResult = serde_json::from_slice(&output.stdout)?;
+    Ok(result.threads.unwrap_or_default())
 }
 
 fn parse_date(s: &str) -> DateTime<Utc> {

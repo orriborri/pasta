@@ -82,8 +82,7 @@ impl VectorStore {
             let existing_schema = table.schema().await?;
             if existing_schema.field_with_name("created_at").is_err()
                 || existing_schema.field_with_name("url").is_err() {
-                db.drop_table(TABLE_NAME, &[]).await?;
-                db.create_table(TABLE_NAME, vec![batch]).execute().await?;
+                anyhow::bail!("Vector index schema requires migration; run `kb reindex` before syncing");
             } else {
                 // Delete existing records by ID for true upsert
                 let id_filter = ids.iter()
@@ -91,7 +90,7 @@ impl VectorStore {
                     .collect::<Vec<_>>()
                     .join(", ");
                 if !id_filter.is_empty() {
-                    table.delete(&format!("id IN ({id_filter})")).await.ok();
+                    table.delete(&format!("id IN ({id_filter})")).await?;
                 }
                 table.add(vec![batch]).execute().await?;
             }
@@ -99,6 +98,22 @@ impl VectorStore {
             db.create_table(TABLE_NAME, vec![batch]).execute().await?;
         }
 
+        Ok(())
+    }
+
+    /// Remove superseded record identities without discarding other vectors.
+    ///
+    /// # Errors
+    /// Returns an error if the index cannot be opened or updated.
+    pub async fn remove_ids(&self, ids: &[String]) -> Result<()> {
+        if ids.is_empty() { return Ok(()); }
+        let db = connect(&self.db_path).execute().await?;
+        if !db.table_names().execute().await?.contains(&TABLE_NAME.to_string()) { return Ok(()); }
+        let table = db.open_table(TABLE_NAME).execute().await?;
+        for chunk in ids.chunks(100) {
+            let filter = chunk.iter().map(|id| format!("'{}'", id.replace('\'', "''"))).collect::<Vec<_>>().join(", ");
+            table.delete(&format!("id IN ({filter})")).await?;
+        }
         Ok(())
     }
 
