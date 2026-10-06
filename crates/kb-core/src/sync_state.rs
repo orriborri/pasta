@@ -5,10 +5,13 @@ use std::sync::Mutex;
 
 use crate::KbConfig;
 
+type CursorWindow = (String, String, String);
+
 /// SQLite-backed sync state: cursors per channel, content hashes per record, locked model name.
 /// Thread-safe via `Mutex` wrapping the connection.
 pub struct SyncState {
     conn: Mutex<Connection>,
+    staged_windows: Option<Mutex<Vec<CursorWindow>>>,
 }
 
 // SAFETY: Connection is only accessed through Mutex, ensuring exclusive access.
@@ -41,7 +44,46 @@ impl SyncState {
                 value TEXT NOT NULL
             );
         ")?;
-        Ok(Self { conn: Mutex::new(conn) })
+        Ok(Self { conn: Mutex::new(conn), staged_windows: None })
+    }
+
+    /// Open fetch state with deferred cursor writes. The caller must first
+    /// durably save the fetched records, then call `commit_windows`.
+    ///
+    /// # Errors
+    /// Returns an error if the database cannot be opened.
+    pub fn open_staged(config: &KbConfig) -> Result<Self> {
+        let mut state = Self::open(config)?;
+        state.staged_windows = Some(Mutex::new(Vec::new()));
+        Ok(state)
+    }
+
+    /// Commit staged fetch cursors together, after source records are durable.
+    ///
+    /// # Errors
+    /// Returns an error if the database transaction fails.
+    ///
+    /// # Panics
+    /// Panics if a state mutex is poisoned.
+    pub fn commit_windows(&self) -> Result<()> {
+        let Some(windows) = &self.staged_windows else { return Ok(()) };
+        let mut windows = windows.lock().unwrap();
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        for (channel, oldest, newest) in windows.iter() {
+            tx.execute(
+                "INSERT INTO cursors (channel_id, newest_ts, oldest_ts) VALUES (?1, ?2, ?3)
+                 ON CONFLICT(channel_id) DO UPDATE SET
+                   newest_ts = MAX(excluded.newest_ts, cursors.newest_ts),
+                   oldest_ts = MIN(excluded.oldest_ts, cursors.oldest_ts)",
+                rusqlite::params![channel, newest, oldest],
+            )?;
+        }
+        tx.commit()?;
+        drop(conn);
+        windows.clear();
+        drop(windows);
+        Ok(())
     }
 
     /// Get the forward cursor for a channel (fetch only newer than this).
@@ -65,6 +107,10 @@ impl SyncState {
     /// # Panics
     /// Panics if the connection mutex is poisoned.
     pub fn update_window(&self, channel_id: &str, oldest_ts: &str, newest_ts: &str) -> Result<()> {
+        if let Some(windows) = &self.staged_windows {
+            windows.lock().unwrap().push((channel_id.into(), oldest_ts.into(), newest_ts.into()));
+            return Ok(());
+        }
         let conn = self.conn.lock().unwrap();
         conn.execute(
             "INSERT INTO cursors (channel_id, newest_ts, oldest_ts) VALUES (?1, ?2, ?3)

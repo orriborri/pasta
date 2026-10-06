@@ -62,6 +62,9 @@ pub struct EvidenceView {
     pub kind: String,
     pub title: String,
     pub snippet: String,
+    pub content: String,
+    pub updated_at: String,
+    pub version_hash: String,
     pub url: String,
     pub created_at: String,
 }
@@ -75,6 +78,9 @@ impl EvidenceView {
             kind: kind_tag(r.kind).to_string(),
             title: r.title.clone(),
             snippet,
+            content: r.content.clone(),
+            updated_at: r.updated_at.to_rfc3339(),
+            version_hash: r.content_hash(),
             url: r.url.clone(),
             created_at: r.created_at.to_rfc3339(),
         }
@@ -335,7 +341,7 @@ pub async fn search(
 
 /// Return a stable page of the latest version of records after an opaque cursor.
 ///
-/// The cursor encodes the updated timestamp and record id. Records are
+/// The v2 cursor encodes the ingestion timestamp and record id. Records are
 /// deduplicated by id before paging so repeated Parquet snapshots do not produce
 /// duplicate wiki-maintenance work.
 ///
@@ -350,40 +356,37 @@ pub fn get_changes(
     use std::collections::HashMap;
 
     let parquet = ParquetStore::new(config);
-    let mut latest: HashMap<String, Record> = HashMap::new();
-    for record in parquet.read_all()? {
-        let replace = latest
-            .get(&record.id)
-            .is_none_or(|current| record.updated_at > current.updated_at);
-        if replace {
-            latest.insert(record.id.clone(), record);
-        }
+    let mut latest: HashMap<String, (Record, DateTime<Utc>)> = HashMap::new();
+    for (record, observed) in parquet.read_observed()? {
+        latest.insert(kb_storage::parquet_store::current_key(&record), (record, observed));
     }
 
-    let after = cursor.map(parse_change_cursor).transpose()?;
-    let mut records: Vec<Record> = latest
-        .into_values()
-        .filter(|record| source_filter.is_none_or(|source| record.source.to_string() == source))
-        .filter(|record| {
-            after.as_ref().is_none_or(|(at, id)| {
-                record.updated_at > *at || (record.updated_at == *at && record.id.as_str() > id.as_str())
-            })
-        })
-        .collect();
-
-    records.sort_by(|a, b| {
-        a.updated_at
-            .cmp(&b.updated_at)
-            .then_with(|| a.id.cmp(&b.id))
-    });
-
+    // v1 cursors used source timestamps and could skip late arrivals. Validate
+    // them but replay once when migrating to ingestion-ordered v2 cursors.
+    let after = if let Some(value) = cursor.and_then(|value| value.strip_prefix("v2|")) {
+        Some(parse_change_cursor(value)?)
+    } else {
+        if let Some(value) = cursor {
+            parse_change_cursor(value)?;
+        }
+        None
+    };
+    let mut records: Vec<(Record, DateTime<Utc>)> = latest.into_values()
+        .filter(|(record, _)| source_filter.is_none_or(|source| record.source.to_string() == source))
+        .filter(|(record, observed)| after.as_ref().is_none_or(|(at, id)| {
+            observed > at || (observed == at && record.id.as_str() > id.as_str())
+        })).collect();
+    records.sort_by(|(a, at), (b, bt)| at.cmp(bt).then_with(|| a.id.cmp(&b.id)));
     let limit = limit.clamp(1, 1000);
     let has_more = records.len() > limit;
     records.truncate(limit);
-    let next_cursor = records
-        .last()
-        .map(change_cursor)
+    let next_cursor = records.last()
+        .map(|(record, observed)| format!("v2|{}|{}", observed.to_rfc3339(), record.id))
         .or_else(|| cursor.map(str::to_string));
+    // Entity extraction augments the change envelope; evidence bodies remain
+    // the original source snapshots returned by get_evidence.
+    let records = kb_pipeline::Pipeline::new(vec![Box::new(kb_pipeline::extract::ExtractStage::new())])
+        .run(records.into_iter().map(|(record, _)| record).collect());
 
     let records = records
         .into_iter()
@@ -423,9 +426,6 @@ fn parse_change_cursor(cursor: &str) -> Result<(DateTime<Utc>, String)> {
     Ok((updated_at, record_id.to_string()))
 }
 
-fn change_cursor(record: &Record) -> String {
-    format!("{}|{}", record.updated_at.to_rfc3339(), record.id)
-}
 
 /// Whether a backing record exists in Parquet for the entity. Matches the
 /// record whose deterministic id or thread/native id corresponds to the ref.
@@ -435,7 +435,7 @@ fn record_exists(config: &KbConfig, entity: &EntityRef) -> Result<bool> {
     // entity's native id (the entity id is the native portion of a record id, or
     // a thread id). This is a read-only best-effort presence check.
     let parquet = ParquetStore::new(config);
-    let all = parquet.read_all()?;
+    let all = parquet.read_current()?;
     let id = &entity.id;
     Ok(all
         .iter()

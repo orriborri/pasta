@@ -199,3 +199,22 @@ fn get_changes_rejects_malformed_cursor() {
     let tc = setup();
     assert!(kb_query::get_changes(&tc.config, Some("not-a-cursor"), None, 10).is_err());
 }
+
+#[test]
+fn late_arrival_and_same_timestamp_edit_are_visible_after_cursor() {
+    let tc = setup();
+    let first = kb_query::get_changes(&tc.config, None, None, 100).unwrap();
+    let mut old = rec("git-late", Source::Git, Kind::Commit, at(2020, 1, 1));
+    let parquet = ParquetStore::new(&tc.config);
+    parquet.write(std::slice::from_ref(&old)).unwrap();
+    let next = kb_query::get_changes(&tc.config, first.next_cursor.as_deref(), None, 100).unwrap();
+    assert_eq!(next.records.len(), 1);
+    assert_eq!(next.records[0].record_id, old.id);
+    old.content = "Edited without changing source timestamp".into();
+    parquet.write(&[old]).unwrap();
+    let edited = kb_query::get_changes(&tc.config, next.next_cursor.as_deref(), None, 100).unwrap();
+    assert_eq!(edited.records.len(), 1);
+    let evidence = kb_query::get_evidence(&tc.config, &["git-late"]).unwrap();
+    assert_eq!(evidence.len(), 1);
+    assert_eq!(evidence[0].content, "Edited without changing source timestamp");
+}

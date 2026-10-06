@@ -161,7 +161,8 @@ async fn embed_and_upsert(vector: &VectorStore, records: &[Record]) -> Result<()
 /// reprocess so the graph never diverges from Parquet.
 fn rebuild_graph(config: &KbConfig, records: &[Record]) -> Result<()> {
     kb_storage::remove_graph_db(config)?;
-    let relations = kb_pipeline::relations_from_records(records);
+    let prepared = kb_pipeline::prepare_evidence(records.to_vec(), &pasta_common::config::get().general.vault_path);
+    let relations = kb_pipeline::relations_from_records(&prepared);
     let graph = GraphStore::open(config)?;
     graph.rebuild(records, &relations)?;
     info!(entities = graph.entity_count()?, relations = graph.relation_count()?, "graph rebuilt");
@@ -204,7 +205,7 @@ fn cmd_recent(config: &KbConfig, days: i64, source: Option<&str>) -> Result<()> 
     use chrono::{Duration, Utc};
     let cutoff = Utc::now() - Duration::days(days);
     let parquet = ParquetStore::new(config);
-    let mut records: Vec<Record> = parquet.read_all()?
+    let mut records: Vec<Record> = parquet.read_current()?
         .into_iter()
         .filter(|r| r.created_at >= cutoff)
         .filter(|r| source.is_none_or(|s| r.source.to_string() == s))
@@ -255,7 +256,7 @@ async fn cmd_reindex(config: &KbConfig) -> Result<()> {
     state.lock_model(embedder::model_name())?;
 
     let parquet = ParquetStore::new(config);
-    let records = parquet.read_all()?;
+    let records = parquet.read_current()?;
     info!(count = records.len(), "records read from parquet");
 
     if records.is_empty() {
@@ -264,6 +265,7 @@ async fn cmd_reindex(config: &KbConfig) -> Result<()> {
     }
 
     let text_index = TextIndex::clear(config)?;
+    let records = kb_pipeline::prepare_evidence(records, &pasta_common::config::get().general.vault_path);
     text_index.upsert(&records)?;
     info!("tantivy rebuilt");
 
@@ -291,7 +293,7 @@ async fn cmd_reprocess(config: &KbConfig) -> Result<()> {
 
     // 1. Read all raw records from Parquet
     let parquet = ParquetStore::new(config);
-    let records = parquet.read_all()?;
+    let records = parquet.read_current()?;
     info!(count = records.len(), "records read from parquet");
 
     if records.is_empty() {
@@ -299,21 +301,9 @@ async fn cmd_reprocess(config: &KbConfig) -> Result<()> {
         return Ok(());
     }
 
-    // 2. Run full pipeline
+    // Keep one complete derived record per evidence ID.
     let vault_path = &pasta_common::config::get().general.vault_path;
-    let registry = std::sync::Arc::new(kb_pipeline::registry::EntityRegistry::load(vault_path));
-    let pipeline = kb_pipeline::Pipeline::new(vec![
-        Box::new(kb_pipeline::normalize::NormalizeStage::new(registry.clone())),
-        Box::new(kb_pipeline::filter::FilterStage::new()),
-        Box::new(kb_pipeline::dedupe::DedupeStage),
-        Box::new(kb_pipeline::extract::ExtractStage::new()),
-        Box::new(kb_pipeline::cross_dedupe::CrossSourceDedupeStage),
-        Box::new(kb_pipeline::chunk::ChunkStage),
-        Box::new(kb_pipeline::summarize::SummarizeStage::new()),
-        Box::new(kb_pipeline::enrich::EnrichStage::new(registry)),
-    ]);
-    let records = pipeline.run(records);
-    info!(after_pipeline = records.len(), "pipeline complete");
+    let records = kb_pipeline::prepare_evidence(records, vault_path);
 
     // 3. Rebuild Tantivy
     let text_index = TextIndex::clear(config)?;
@@ -461,7 +451,7 @@ fn cmd_timeline(config: &KbConfig, entity: &str, limit: usize, json: bool) -> Re
 /// always safe to run.
 fn cmd_graph_rebuild(config: &KbConfig) -> Result<()> {
     let parquet = ParquetStore::new(config);
-    let records = parquet.read_all()?;
+    let records = parquet.read_current()?;
     info!(count = records.len(), "records read from parquet");
     if records.is_empty() {
         println!("No records in Parquet to build a graph from.");

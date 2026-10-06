@@ -44,6 +44,22 @@ fn fixture() -> Vec<Record> {
     vec![commit, msg]
 }
 
+#[test]
+fn changed_record_replaces_removed_relations_including_empty_replacement() {
+    let dir = TempDir::new();
+    let store = GraphStore::open_path(&dir.db("graph.db")).unwrap();
+    let mut records = fixture();
+    store.replace_records(&records, &relations_from_records(&records)).unwrap();
+    records[0].entities.clear();
+    store.replace_records(&records[..1], &relations_from_records(&records[..1])).unwrap();
+    let relations = store.relations_by_evidence(&records[0].id).unwrap();
+    assert!(!relations.iter().any(|relation| relation.object.kind == EntityKind::LinearIssue));
+    assert!(!store.relations_by_evidence(&records[1].id).unwrap().is_empty());
+    records[0].author.clear();
+    store.replace_records(&records[..1], &relations_from_records(&records[..1])).unwrap();
+    assert!(store.relations_by_evidence(&records[0].id).unwrap().is_empty());
+}
+
 struct TempDir {
     path: std::path::PathBuf,
 }

@@ -108,6 +108,20 @@ impl TextIndex {
         Ok(())
     }
 
+    /// Remove superseded record identities during a source ID migration.
+    ///
+    /// # Errors
+    /// Returns an error if the writer cannot commit.
+    pub fn remove_ids(&self, ids: &[String]) -> Result<()> {
+        if ids.is_empty() { return Ok(()); }
+        let mut writer: IndexWriter = self.index.writer(50_000_000)?;
+        for id in ids {
+            writer.delete_term(tantivy::Term::from_field_text(self.f_id, id));
+        }
+        writer.commit()?;
+        Ok(())
+    }
+
     /// Full-text search returning top-k results.
     ///
     /// # Errors

@@ -66,15 +66,16 @@ impl Record {
         format!("{source}-{native_id}")
     }
 
-    /// Content hash for change detection (skip re-embed if unchanged).
+    /// Hash the complete record for change detection (skip re-embed if unchanged).
+    ///
+    /// # Panics
+    /// Panics if serializing the plain record fields unexpectedly fails.
     #[must_use]
     pub fn content_hash(&self) -> String {
+        // Include metadata used by retrieval and the graph. JSON encoding also
+        // avoids ambiguous delimiter boundaries in titles/content.
         let mut h = Sha256::new();
-        h.update(self.id.as_bytes());
-        h.update(b"|");
-        h.update(self.title.as_bytes());
-        h.update(b"|");
-        h.update(self.content.as_bytes());
+        h.update(serde_json::to_vec(self).expect("Record serialization cannot fail"));
         format!("{:x}", h.finalize())
     }
 }

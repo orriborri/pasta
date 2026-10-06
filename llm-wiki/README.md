@@ -110,10 +110,18 @@ After all jobs from the change page have succeeded, advance the durable cursor:
 ```bash
 python llm-wiki/wiki.py advance \
   --wiki ~/vault/Knowledge \
-  --changes /tmp/wiki-changes.json
+  --changes /tmp/wiki-changes.json \
+  --plan /tmp/wiki-plan.json
 ```
 
-If Pasta reports `has_more: true`, fetch/process the next change page before advancing the durable cursor. The toolkit refuses this by default.
+Each applied patch records a durable completion receipt. Jobs needing no page change must be explicitly completed with a reason:
+
+```bash
+python llm-wiki/wiki.py skip --wiki ~/vault/Knowledge \
+  --plan /tmp/wiki-plan.json --job-id JOB_ID --reason "No durable change"
+```
+
+`advance` requires the matching plan and refuses unfinished jobs or changed output pages. Advance after each completed page, including a page with `has_more: true`, then fetch the next page with the saved cursor. Plans snapshot page hashes; an intervening edit requires replanning. Exact patch retries recover a page write interrupted before its completion receipt. Writes use a POSIX advisory lock, reject symlinks below the wiki root, and preserve unrelated pages. Manual editors do not participate in that lock; hash checks detect edits observed before replacement.
 
 ## Wiki page contract
 
@@ -143,7 +151,8 @@ The service is migrating to EKS. [source](pasta:evidence:linear-RP-123)
 - `plan` — turn a Pasta change page into entity-scoped LLM jobs.
 - `validate` — enforce path safety, entity ownership, and evidence boundaries.
 - `apply` — atomically write a validated Markdown page.
-- `advance` — store the next Pasta cursor after a successful cycle.
+- `advance` — verify completion receipts and store the next Pasta cursor.
+- `skip` — record an explicit no-change decision with its reason.
 - `audit` — report uncited pages, missing entity metadata, duplicate entity ownership, and all referenced evidence IDs.
 
 The `audit` evidence ID list can be resolved in bulk through Pasta `get_evidence` to detect stale/broken references without granting the LLM authority to invent replacements.

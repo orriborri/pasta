@@ -55,12 +55,14 @@ async fn fetch_outcome_with_lookback(
     lookback_days: i64,
 ) -> Result<FetchOutcome> {
     let config = pasta_common::config::kb_config();
-    let state = SyncState::open(&config)?;
+    let parquet = ParquetStore::new(&config);
 
     let mut all_records: Vec<Record> = Vec::new();
     let mut successful_sources = Vec::new();
 
     for src in sources {
+        // Each source stages its own cursors; failed sources discard them.
+        let state = SyncState::open_staged(&config)?;
         // Fetch each source independently. A single source failing (e.g. an
         // expired credential) must NOT abort the whole cycle — log it and
         // continue so the remaining sources still produce feeds/records.
@@ -88,6 +90,8 @@ async fn fetch_outcome_with_lookback(
         };
         match result {
             Ok(records) => {
+                parquet.write_changed(&records)?;
+                state.commit_windows()?;
                 successful_sources.push((*src).to_string());
                 if !records.is_empty() {
                     info!(source = src, count = records.len(), "fetched");
@@ -111,31 +115,19 @@ async fn fetch_outcome_with_lookback(
 /// # Errors
 /// Returns error if embedding, pipeline, or storage fails.
 pub async fn index(records: Vec<Record>) -> Result<usize> {
-    if records.is_empty() {
-        return Ok(0);
-    }
-
     let config = pasta_common::config::kb_config();
-    embedder::init().await?;
-
-    let state = SyncState::open(&config)?;
-    state.lock_model(embedder::model_name())?;
-
-    // Run pipeline
+    let parquet = ParquetStore::new(&config);
+    // Save complete fetched records before any transformation or API call.
+    parquet.write_changed(&records)?;
     let vault_path = &pasta_common::config::get().general.vault_path;
-    let registry = std::sync::Arc::new(kb_pipeline::registry::EntityRegistry::load(vault_path));
-    let pipeline = kb_pipeline::Pipeline::new(vec![
-        Box::new(kb_pipeline::normalize::NormalizeStage::new(registry.clone())),
-        Box::new(kb_pipeline::filter::FilterStage::new()),
-        Box::new(kb_pipeline::dedupe::DedupeStage),
-        Box::new(kb_pipeline::extract::ExtractStage::new()),
-        Box::new(kb_pipeline::cross_dedupe::CrossSourceDedupeStage),
-        Box::new(kb_pipeline::chunk::ChunkStage),
-        Box::new(kb_pipeline::summarize::SummarizeStage::new()),
-        Box::new(kb_pipeline::enrich::EnrichStage::new(registry)),
-    ]);
-    let all_records = pipeline.run(records);
-    info!(after_pipeline = all_records.len(), "pipeline complete");
+    // Revisit durable records on every cycle, even when fetch returns no new
+    // records. Hashes describe completed indexes, never merely attempted writes.
+    let state = SyncState::open(&config)?;
+    let current = parquet.read_current()?;
+    let active_ids: std::collections::HashSet<_> = current.iter().map(|record| record.id.clone()).collect();
+    let retired: Vec<_> = parquet.read_latest()?.into_iter().filter(|record| !active_ids.contains(&record.id) && state.get_hash(&record.id).as_deref() != Some("retired:v1")).collect();
+    let retired_ids: Vec<_> = retired.iter().map(|record| record.id.clone()).collect();
+    let all_records = kb_pipeline::prepare_evidence(current, vault_path);
 
     // Entity management
     let kb_cfg = &pasta_common::config::get().kb;
@@ -150,43 +142,45 @@ pub async fn index(records: Vec<Record>) -> Result<usize> {
     // Hash filter unchanged records
     let records: Vec<_> = all_records.into_iter().filter(|r| {
         let hash = r.content_hash();
-        if state.get_hash(&r.id).as_deref() == Some(hash.as_str()) {
-            return false;
-        }
-        state.set_hash(&r.id, &hash).ok();
-        true
+        state.get_hash(&r.id).as_deref() != Some(hash.as_str())
     }).collect();
 
-    if records.is_empty() {
+    if records.is_empty() && retired_ids.is_empty() {
         return Ok(0);
     }
     info!(changed = records.len(), "records after hash filter");
 
-    // Store
-    let parquet = ParquetStore::new(&config);
-    parquet.write(&records)?;
-
-    let text_index = TextIndex::open(&config)?;
-    text_index.upsert(&records)?;
-
-    let vector = VectorStore::new(&config);
-    embed_and_upsert(&vector, &records).await?;
-
-    // Evidence graph (derived index): upsert relations for this batch. Best-effort
-    // — a failure here is logged and left for the next `kb reindex` to regenerate,
-    // matching how other derived-index write failures are tolerated.
-    match kb_storage::GraphStore::open(&config) {
-        Ok(graph) => {
-            let relations = kb_pipeline::relations_from_records(&records);
-            if let Err(e) = graph.upsert(&relations) {
-                tracing::warn!(error = %e, "graph upsert failed, will be rebuilt on next reindex");
-            } else {
-                info!(relations = relations.len(), "graph upserted");
-            }
-        }
-        Err(e) => tracing::warn!(error = %e, "graph open failed, skipping graph upsert"),
+    complete_indexing(&state, &records, async {
+        embedder::init().await?;
+        state.lock_model(embedder::model_name())?;
+        let text_index = TextIndex::open(&config)?;
+        text_index.remove_ids(&retired_ids)?;
+        text_index.upsert(&records)?;
+        let vector = VectorStore::new(&config);
+        vector.remove_ids(&retired_ids).await?;
+        embed_and_upsert(&vector, &records).await?;
+        let graph = kb_storage::GraphStore::open(&config)?;
+        let relations = kb_pipeline::relations_from_records(&records);
+        graph.replace_records(&retired, &[])?;
+        graph.replace_records(&records, &relations)?;
+        Ok(())
+    }).await?;
+    for record in &retired {
+        state.set_hash(&record.id, "retired:v1")?;
     }
+    Ok(records.len())
+}
 
+async fn complete_indexing(
+    state: &SyncState,
+    records: &[Record],
+    write_indexes: impl std::future::Future<Output = Result<()>>,
+) -> Result<usize> {
+    write_indexes.await?;
+    // Partial hash commits are safe: their records have all indexes durable.
+    for record in records {
+        state.set_hash(&record.id, &record.content_hash())?;
+    }
     Ok(records.len())
 }
 
@@ -462,6 +456,57 @@ async fn embed_and_upsert(vector: &VectorStore, records: &[Record]) -> Result<()
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn failed_index_is_retried_from_saved_evidence_after_fetch_cursor_commits() {
+        let directory = std::env::temp_dir().join(format!("kb-retry-{}-{}", std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let config = kb_core::KbConfig { data_dir: directory.clone() };
+        let state = SyncState::open_staged(&config).unwrap();
+        state.update_window("channel", "1", "2").unwrap();
+        assert!(SyncState::open(&config).unwrap().cursor("channel").is_none());
+        let time = chrono::Utc::now();
+        let record = Record { id: "slack-test".into(), source: Source::Slack,
+            kind: kb_core::Kind::Message, title: "Test".into(), content: "Full source body".into(),
+            author: String::new(), participants: vec![], created_at: time, updated_at: time,
+            url: String::new(), thread_id: String::new(), entities: vec![], tags: vec![] };
+        let parquet = ParquetStore::new(&config);
+        parquet.write_changed(std::slice::from_ref(&record)).unwrap();
+        state.commit_windows().unwrap();
+        assert_eq!(SyncState::open(&config).unwrap().cursor("channel").as_deref(), Some("2"));
+
+        let result = complete_indexing(&state, std::slice::from_ref(&record), async {
+            // Simulate a vector failure after a successful text write.
+            TextIndex::open(&config)?.upsert(std::slice::from_ref(&record))?;
+            anyhow::bail!("injected vector failure")
+        }).await;
+        assert!(result.is_err());
+        assert!(state.get_hash(&record.id).is_none());
+
+        // Restart, with no new fetched records: unfinished saved evidence is
+        // still available and not marked completed.
+        let restarted = SyncState::open(&config).unwrap();
+        let pending: Vec<_> = parquet.read_latest().unwrap().into_iter()
+            .filter(|r| restarted.get_hash(&r.id).as_deref() != Some(r.content_hash().as_str())).collect();
+        assert_eq!(pending.len(), 1);
+        complete_indexing(&restarted, &pending, async { Ok(()) }).await.unwrap();
+        assert_eq!(restarted.get_hash(&record.id), Some(record.content_hash()));
+        let _ = fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn failed_raw_write_does_not_commit_fetch_cursor() {
+        let directory = std::env::temp_dir().join(format!("kb-write-failure-{}-{}", std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let config = kb_core::KbConfig { data_dir: directory.clone() };
+        let state = SyncState::open_staged(&config).unwrap();
+        state.update_window("channel", "1", "2").unwrap();
+        fs::write(config.raw_dir(), "a file blocks the raw directory").unwrap();
+        assert!(ParquetStore::new(&config).read_latest().is_err());
+        drop(state); // failed source drops its staged cursors
+        assert!(SyncState::open(&config).unwrap().cursor("channel").is_none());
+        let _ = fs::remove_dir_all(directory);
+    }
 
     /// Test that kb-sync's `write_feeds` uses `VaultLayout` instead of hardcoded path
     #[test]

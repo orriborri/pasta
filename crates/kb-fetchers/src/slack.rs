@@ -42,15 +42,16 @@ impl SlackFetcher {
         let fallback_oldest = oldest_ts(self.lookback_days);
 
         // Fetch DMs
-        if let Some(convs) = self.list_convs("im", 50).await {
+        {
+            let convs = self.list_convs("im", 50).await?;
             info!(count = convs.len(), "checking slack DMs for new messages");
             for conv in &convs {
                 let oldest = state.cursor(&conv.id).unwrap_or_else(|| fallback_oldest.clone());
-                let msgs = self.fetch_history(&conv.id, &oldest).await;
+                let msgs = self.fetch_history(&conv.id, &oldest).await?;
                 if !msgs.is_empty() {
                     let first_ts = msgs.first().and_then(|m| m.ts.as_deref()).unwrap_or("");
                     let last_ts = msgs.last().and_then(|m| m.ts.as_deref()).unwrap_or("");
-                    state.update_window(&conv.id, first_ts, last_ts).ok();
+                    state.update_window(&conv.id, first_ts, last_ts)?;
                     let person = conv.user.as_deref().unwrap_or("unknown");
                     info!(person = %person, messages = msgs.len(), "new DMs");
                     for msg in msgs {
@@ -61,19 +62,20 @@ impl SlackFetcher {
         }
 
         // Fetch channels
-        if let Some(convs) = self.list_convs("public_channel,private_channel", 100).await {
+        {
+            let convs = self.list_convs("public_channel,private_channel", 100).await?;
             info!(count = convs.len(), "checking slack channels for new messages");
             let mut fetched_count = 0;
             for conv in &convs {
                 let ch_name = conv.name.as_deref().unwrap_or("unknown");
                 let oldest = state.cursor(&conv.id).unwrap_or_else(|| fallback_oldest.clone());
-                let msgs = self.fetch_history(&conv.id, &oldest).await;
+                let msgs = self.fetch_history(&conv.id, &oldest).await?;
                 if !msgs.is_empty() {
                     fetched_count += 1;
                     info!(channel = %ch_name, messages = msgs.len(), "new messages");
                     let first_ts = msgs.first().and_then(|m| m.ts.as_deref()).unwrap_or("");
                     let last_ts = msgs.last().and_then(|m| m.ts.as_deref()).unwrap_or("");
-                    state.update_window(&conv.id, first_ts, last_ts).ok();
+                    state.update_window(&conv.id, first_ts, last_ts)?;
                     for msg in msgs {
                         records.push(msg_to_record(&conv.id, &msg, ch_name, "channel"));
                     }
@@ -89,53 +91,48 @@ impl SlackFetcher {
         Ok(records)
     }
 
-    async fn list_convs(&self, types: &str, limit: usize) -> Option<Vec<Conv>> {
-        let json = self.run_cmd(&[
-            "conversations.list",
-            &format!("types={types}"),
-            &format!("limit={limit}"),
-            "exclude_archived=true",
-        ]).await?;
-        let resp: ConvListResp = serde_json::from_str(&json).ok()?;
-        if resp.ok { resp.channels } else { None }
+    async fn list_convs(&self, types: &str, limit: usize) -> Result<Vec<Conv>> {
+        let mut channels = Vec::new();
+        let mut cursor = String::new();
+        loop {
+            let mut args = vec!["conversations.list".to_string(), format!("types={types}"),
+                format!("limit={limit}"), "exclude_archived=true".to_string()];
+            if !cursor.is_empty() { args.push(format!("cursor={cursor}")); }
+            let refs: Vec<_> = args.iter().map(String::as_str).collect();
+            let json = self.run_cmd(&refs).await.ok_or_else(|| anyhow::anyhow!("Slack conversation listing failed"))?;
+            let response: ConvListResp = serde_json::from_str(&json)?;
+            if !response.ok { anyhow::bail!("Slack conversation listing returned an error"); }
+            channels.extend(response.channels.unwrap_or_default());
+            let next = response.response_metadata.and_then(|meta| meta.next_cursor).unwrap_or_default();
+            if next.is_empty() { break; }
+            if next == cursor { anyhow::bail!("Slack listing repeated its pagination cursor"); }
+            cursor = next;
+        }
+        Ok(channels)
     }
 
-    async fn fetch_history(&self, channel: &str, oldest: &str) -> Vec<SlackMsg> {
+    async fn fetch_history(&self, channel: &str, oldest: &str) -> Result<Vec<SlackMsg>> {
         let mut all = Vec::new();
-        let mut cursor: Option<String> = None;
-        for _ in 0..5 {
-            let mut args = vec![
-                "conversations.history".to_string(),
-                format!("channel={channel}"),
-                format!("oldest={oldest}"),
-                "limit=200".to_string(),
-            ];
-            if let Some(c) = &cursor {
-                args.push(format!("cursor={c}"));
-            }
-            let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
-            let Some(json) = self.run_cmd(&arg_refs).await else { break };
-            let Ok(resp) = serde_json::from_str::<HistResp>(&json) else { break };
-            if !resp.ok { break; }
-            if let Some(msgs) = resp.messages {
-                for m in msgs {
-                    all.push(SlackMsg {
-                        ts: m.ts,
-                        author: m.user.unwrap_or_default(),
-                        text: m.text.unwrap_or_default(),
-                    });
-                }
-            }
-            if resp.has_more.unwrap_or(false) {
-                cursor = resp.response_metadata.and_then(|rm| rm.next_cursor).filter(|c| !c.is_empty());
-                if cursor.is_none() { break; }
-                tokio::time::sleep(tokio::time::Duration::from_millis(1200)).await;
-            } else {
-                break;
-            }
+        let mut cursor = String::new();
+        loop {
+            let mut args = vec!["conversations.history".to_string(), format!("channel={channel}"),
+                format!("oldest={oldest}"), "limit=200".to_string()];
+            if !cursor.is_empty() { args.push(format!("cursor={cursor}")); }
+            let refs: Vec<_> = args.iter().map(String::as_str).collect();
+            let json = self.run_cmd(&refs).await.ok_or_else(|| anyhow::anyhow!("Slack history fetch failed for {channel}"))?;
+            let response: HistResp = serde_json::from_str(&json)?;
+            if !response.ok { anyhow::bail!("Slack history returned an error for {channel}"); }
+            all.extend(response.messages.unwrap_or_default().into_iter().map(|message| SlackMsg {
+                ts: message.ts, author: message.user.unwrap_or_default(), text: message.text.unwrap_or_default(),
+            }));
+            if !response.has_more.unwrap_or(false) { break; }
+            let next = response.response_metadata.and_then(|meta| meta.next_cursor).unwrap_or_default();
+            if next.is_empty() || next == cursor { anyhow::bail!("Slack history has more messages without a new cursor"); }
+            cursor = next;
+            tokio::time::sleep(tokio::time::Duration::from_millis(1200)).await;
         }
         all.reverse();
-        all
+        Ok(all)
     }
 
     /// Resolve all unique user IDs in records to display names.
@@ -236,7 +233,7 @@ fn oldest_ts(days: i64) -> String {
 // --- Slack API response types ---
 
 #[derive(Deserialize)]
-struct ConvListResp { ok: bool, channels: Option<Vec<Conv>> }
+struct ConvListResp { ok: bool, channels: Option<Vec<Conv>>, response_metadata: Option<RespMeta> }
 #[derive(Deserialize)]
 struct Conv { id: String, user: Option<String>, name: Option<String> }
 #[derive(Deserialize)]

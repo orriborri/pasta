@@ -61,3 +61,15 @@ impl Pipeline {
         current
     }
 }
+
+/// Prepare one derived record per source record without filtering, merging, or
+/// truncating source bodies. Raw evidence is persisted before this is called.
+#[must_use]
+pub fn prepare_evidence(records: Vec<Record>, vault_path: impl AsRef<std::path::Path>) -> Vec<Record> {
+    let registry = std::sync::Arc::new(registry::EntityRegistry::load(&vault_path.as_ref().to_string_lossy()));
+    Pipeline::new(vec![
+        Box::new(normalize::NormalizeStage::new(registry.clone())),
+        Box::new(extract::ExtractStage::new()),
+        Box::new(enrich::EnrichStage::new(registry)),
+    ]).run(records)
+}

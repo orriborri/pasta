@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 kb-core = { path = "../kb-core" }
 kb-storage = { path = "../kb-storage" }
+kb-pipeline = { path = "../kb-pipeline" }
 anyhow = { workspace = true }
 chrono = { workspace = true }
 serde = { workspace = true }
@@ -13,7 +14,6 @@ schemars = { version = "1", features = ["chrono04"] }
 
 [dev-dependencies]
 tokio = { workspace = true }
-kb-pipeline = { path = "../kb-pipeline" }
 
 [lints]
 workspace = true
