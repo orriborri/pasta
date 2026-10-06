@@ -144,6 +144,7 @@ impl GraphStore {
             insert_relation(&tx, relation)?;
         }
         tx.commit()?;
+        drop(conn);
         Ok(())
     }
 

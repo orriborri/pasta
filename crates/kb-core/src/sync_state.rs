@@ -82,6 +82,7 @@ impl SyncState {
         tx.commit()?;
         drop(conn);
         windows.clear();
+        drop(windows);
         Ok(())
     }
 

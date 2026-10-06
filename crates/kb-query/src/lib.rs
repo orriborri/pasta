@@ -363,10 +363,14 @@ pub fn get_changes(
 
     // v1 cursors used source timestamps and could skip late arrivals. Validate
     // them but replay once when migrating to ingestion-ordered v2 cursors.
-    let after = match cursor {
-        Some(value) if value.starts_with("v2|") => Some(parse_change_cursor(&value[3..])?),
-        Some(value) => { parse_change_cursor(value)?; None },
-        None => None,
+    let after = match cursor.and_then(|value| value.strip_prefix("v2|")) {
+        Some(value) => Some(parse_change_cursor(value)?),
+        None => {
+            if let Some(value) = cursor {
+                parse_change_cursor(value)?;
+            }
+            None
+        }
     };
     let mut records: Vec<(Record, DateTime<Utc>)> = latest.into_values()
         .filter(|(record, _)| source_filter.is_none_or(|source| record.source.to_string() == source))
