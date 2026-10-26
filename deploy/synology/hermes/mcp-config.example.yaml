@@ -1,0 +1,11 @@
+# Merge into the pinned runtime's /opt/data/config.yaml.
+mcp_servers:
+  pasta-attention:
+    command: /usr/local/bin/pasta-assistant
+    args: [--database, /data/assistant.sqlite, mcp, --registry, /vault/jdex-registry.json]
+  pasta-knowledge:
+    command: /usr/local/bin/kb-mcp
+    env:
+      PASTA_ASSISTANT_DATABASE: /data/assistant.sqlite
+      # Optional; an unset whole-variable reference is omitted by the pinned runtime.
+      OPENAI_API_KEY: ${OPENAI_API_KEY}

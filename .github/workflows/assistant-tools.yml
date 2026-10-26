@@ -1,0 +1,35 @@
+name: Assistant tools
+on:
+  pull_request:
+    paths:
+      - 'crates/assistant/**'
+      - 'crates/kb-fetchers/**'
+      - 'crates/common/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'Dockerfile.assistant'
+      - '.github/workflows/assistant-tools.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'crates/assistant/**'
+      - 'crates/kb-fetchers/**'
+      - 'crates/common/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'Dockerfile.assistant'
+      - '.github/workflows/assistant-tools.yml'
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt -p pasta-assistant -- --check
+      - run: cargo test --locked -p pasta-assistant -p kb-fetchers
+      - run: cargo clippy --locked -p pasta-assistant -p kb-fetchers --all-targets -- -D warnings
+      - run: docker build -f Dockerfile.assistant -t pasta-assistant:ci .
+      - run: docker run --rm --network none pasta-assistant:ci --help

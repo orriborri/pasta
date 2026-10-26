@@ -35,11 +35,11 @@ Useful Pasta MCP tools include:
 ### Background from the compiled wiki
 
 Pasta search does not index the compiled wiki, so read it directly when you need orientation on a person, issue, or system. It lives at `<vault>/.llm-wiki/generated/` (vault path: `~/.pasta/config.toml` → `[general].vault_path`):
-- `Linear Issues/<key>.md`, lowercase issue key, for example `ops-233.md`;
+- `NN.NN/<title>.md`, selected from approved JDex routing;
 - `Profiles/<name-slug>.md` for people and organizations;
 - `Systems/` for services, bots, and infrastructure; `Topics/` for channel and theme digests.
 
-Wiki prose is a synthesis and may be stale. Before stating a wiki claim as fact, resolve its `pasta:evidence:<record_id>` citation with `get_evidence`; drop or flag claims you cannot verify. Wiki and PARA maintenance belong to the vault's `llm-wiki` skill.
+Wiki prose is a synthesis and may be stale. Before stating a wiki claim as fact, resolve its `pasta:evidence:<record_id>` citation with `get_evidence`; drop or flag claims you cannot verify. Wiki and JDex maintenance belong to the vault's `llm-wiki` skill.
 
 ## Write path
 
@@ -56,10 +56,10 @@ Pasta evidence
      ↓
 LLM Wiki compiler  (generated working pages)
      ↓  explicit curation after evidence verification
-existing PARA notes  (human-readable summaries)
+existing JDex notes  (human-readable summaries)
 ```
 
-Do not directly promote a new personal statement into a curated PARA page during the same conversational turn unless the user explicitly asks for that edit.
+Do not directly promote a new personal statement into a curated JDex page during the same conversational turn unless the user explicitly asks for that edit.
 
 ## Behavior
 

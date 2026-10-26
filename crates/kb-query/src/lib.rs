@@ -399,8 +399,10 @@ pub fn get_changes(
         .or_else(|| cursor.map(str::to_string));
     // Entity extraction augments the change envelope; evidence bodies remain
     // the original source snapshots returned by get_evidence.
-    let records = kb_pipeline::Pipeline::new(vec![Box::new(kb_pipeline::extract::ExtractStage::new())])
-        .run(records.into_iter().map(|(record, _)| record).collect());
+    let pipeline = kb_pipeline::Pipeline::new(vec![Box::new(kb_pipeline::extract::ExtractStage::new())]);
+    let records = records.into_iter().flat_map(|(record, ingested)| {
+        pipeline.run(vec![record]).into_iter().map(move |record| (record, ingested))
+    });
 
     let records = records
         .into_iter()

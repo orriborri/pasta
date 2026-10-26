@@ -1,0 +1,25 @@
+services:
+  assistant:
+    build:
+      context: ../../..
+      dockerfile: deploy/synology/hermes/Dockerfile
+      args:
+        HERMES_IMAGE: ${HERMES_IMAGE:?Set a tested Hermes image pinned by digest}
+    restart: unless-stopped
+    command: [gateway, run]
+    env_file:
+      - ${HERMES_PROVIDER_ENV:?Set a private provider env file}
+    environment:
+      HERMES_UID: ${HERMES_UID:-10000}
+      HERMES_GID: ${HERMES_GID:-10000}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?Set the bot token}
+      TELEGRAM_ALLOWED_USERS: ${TELEGRAM_ALLOWED_USERS:?Set the numeric owner ID}
+      PASTA_ASSISTANT_DATABASE: /data/assistant.sqlite
+      TZ: Europe/Helsinki
+    volumes:
+      - ${HERMES_DATA:?Set local Hermes state directory}:/opt/data
+      - ${PASTA_ASSISTANT_DATA:?Set local attention state directory}:/data
+      - ${PASTA_KB_DATA:?Set local search index directory}:/kb
+      - ${PASTA_VAULT:?Set canonical JDex vault directory}:/vault:ro
+    security_opt:
+      - no-new-privileges:true

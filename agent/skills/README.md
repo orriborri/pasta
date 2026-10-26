@@ -15,7 +15,7 @@ Only meaningful inside the Readpeak vault. The vault path comes from `~/.pasta/c
 
 - `daily-plan` — today's top three priorities from the daily note, task board, projects, and Pasta.
 - `weekly-review` — weekly retro from git history and daily notes.
-- `llm-wiki` — the `vault.py` wiki upkeep cycle and PARA curation from generated pages.
+- `llm-wiki` — the `vault.py` wiki upkeep cycle and JDex curation from generated pages.
 
 ## Install
 
@@ -32,6 +32,6 @@ Unchanged copies are skipped. Retired global skills (`pasta-vault`, `daily-plan`
 
 ```text
 user statement → raw-inbox-memory → 0. Inbox/Raw/ → Pasta evidence
-Pasta evidence → llm-wiki (vault.py) → .llm-wiki/generated/ → curated PARA notes
+Pasta evidence → llm-wiki (vault.py) → .llm-wiki/generated/ → curated JDex notes
 personal-agent / daily-plan / weekly-review read Pasta and the vault
 ```

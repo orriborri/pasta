@@ -70,6 +70,6 @@ If capture fails, tell the user it was not persisted. Never pretend storage succ
 
 ## After capture
 
-Do not immediately turn the raw capture into curated wiki knowledge; Pasta ingests it as evidence for later synthesis. For an explicitly requested PARA update, follow the vault's `llm-wiki` skill.
+Do not immediately turn the raw capture into curated wiki knowledge; Pasta ingests it as evidence for later synthesis. For an explicitly requested JDex update, follow the vault's `llm-wiki` skill.
 
 Only run an immediate Pasta vault sync when the user needs the new capture to become searchable right away.

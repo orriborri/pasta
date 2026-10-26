@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use tracing::info;
 
 /// Sources that can be synced.
-pub const ALL_SOURCES: &[&str] = &["slack", "gmail", "linear", "gitlab", "git", "vault", "calendar", "gdocs"];
+pub const ALL_SOURCES: &[&str] = &["slack", "gmail", "linear", "gitlab", "git", "vault", "calendar", "gdocs", "assistant"];
 
 /// Returns the feeds directory path using `VaultLayout`.
 /// This ensures the feeds directory is always relative to the configured vault path.
@@ -85,6 +85,7 @@ async fn fetch_outcome_with_lookback(
                     .with_calendar_ids(cal_ids)
                     .fetch(&state).await
             }
+            "assistant" => std::env::var_os("PASTA_ASSISTANT_DATABASE").map_or_else(|| Ok(vec![]), |p| kb_fetchers::assistant::fetch(Path::new(&p))),
             "gdocs" => kb_fetchers::gdocs::GdocsFetcher::new().fetch(&state).await,
             _ => continue,
         };
@@ -113,6 +114,19 @@ async fn fetch_outcome_with_lookback(
 /// # Errors
 /// Returns error if embedding, pipeline, or storage fails.
 pub async fn index(records: Vec<Record>) -> Result<usize> {
+    index_with_vault_writes(records, pasta_common::config::get().kb.write_vault_metadata).await
+}
+
+/// Index retained captures with no entity or discovery writes to the vault.
+/// # Errors
+/// Returns errors if the configured store or any index cannot be read/written.
+pub async fn sync_assistant_captures() -> Result<usize> {
+    let path = std::env::var_os("PASTA_ASSISTANT_DATABASE")
+        .ok_or_else(|| anyhow::anyhow!("PASTA_ASSISTANT_DATABASE is required"))?;
+    index_with_vault_writes(kb_fetchers::assistant::fetch(Path::new(&path))?, false).await
+}
+
+async fn index_with_vault_writes(records: Vec<Record>, write_vault_metadata: bool) -> Result<usize> {
     let config = pasta_common::config::kb_config();
     let parquet = ParquetStore::new(&config);
     // Save complete fetched records before any transformation or API call.
@@ -134,8 +148,10 @@ pub async fn index(records: Vec<Record>) -> Result<usize> {
         slack_is_internal: kb_cfg.internal_slack,
     };
     let entity_mgr = kb_pipeline::entity_manager::EntityManager::new(vault_path, allowlist);
-    let discoveries = entity_mgr.update_from_records(&all_records);
-    kb_pipeline::discoveries::surface_discoveries(vault_path, &discoveries);
+    if write_vault_metadata {
+        let discoveries = entity_mgr.update_from_records(&all_records);
+        kb_pipeline::discoveries::surface_discoveries(vault_path, &discoveries);
+    }
 
     // Hash filter unchanged records
     let records: Vec<_> = all_records.into_iter().filter(|r| {
@@ -187,6 +203,7 @@ async fn complete_indexing(
 /// # Errors
 /// Returns error if fetching or indexing fails.
 pub async fn run(sources: &[&str]) -> Result<usize> {
+    if sources == ["assistant"] { return sync_assistant_captures().await; }
     let records = fetch_with_lookback(sources, 30).await?;
     index(records).await
 }

@@ -69,6 +69,11 @@ struct TimelineParams {
 }
 
 #[derive(Debug, serde::Serialize, schemars::JsonSchema)]
+struct AssistantSyncResponse {
+    indexed_records: usize,
+}
+
+#[derive(Debug, serde::Serialize, schemars::JsonSchema)]
 struct SearchResponse {
     hits: Vec<SearchHit>,
 }
@@ -108,6 +113,12 @@ struct KbServer;
 // rmcp routes tools through instance methods, including stateless handlers.
 #[allow(clippy::unused_self)]
 impl KbServer {
+    #[tool(description = "Import retained assistant captures into Pasta indexes. Uses operator-configured paths and never writes vault metadata. Failure does not mean indexing succeeded.")]
+    async fn sync_assistant_captures(&self) -> Result<Json<AssistantSyncResponse>, ErrorData> {
+        let count = kb_sync::sync_assistant_captures().await.map_err(|e| query_err(&e))?;
+        Ok(Json(AssistantSyncResponse { indexed_records: count }))
+    }
+
     #[tool(
         description = "Search the knowledge base using hybrid search (semantic + full-text). Returns structured hits, each with record_id, source, title, snippet, url, timestamp, and score."
     )]

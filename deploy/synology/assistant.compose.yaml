@@ -1,0 +1,16 @@
+# One-shot tools, invoked by a configured agent. No bot, scheduler or model daemon.
+services:
+  assistant-tools:
+    build:
+      context: ../..
+      dockerfile: Dockerfile.assistant
+    user: "${PASTA_UID:-10001}:${PASTA_GID:-10001}"
+    volumes:
+      - "${PASTA_ASSISTANT_DATA:?Set a dedicated local NAS application-data path}:/data"
+      - "${PASTA_VAULT:?Set the canonical JDex vault path}:/vault:ro"
+    network_mode: none
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL

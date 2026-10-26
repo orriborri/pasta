@@ -143,3 +143,19 @@ The lossless guarantee starts at the records supplied by each fetcher.
 Atomic Parquet writes and wiki durability checks target local POSIX filesystems.
 Keep maintenance to one daemon/CLI writer at a time; scheduling single-flight
 protection does not coordinate separate CLI processes.
+
+## NAS assistant tools
+
+The optional Rust `pasta-assistant` CLI provides durable captures and a shared
+attention register for an external assistant runtime. See
+[setup, ownership, and limitations](docs/nas-assistant-tools.md).
+
+## Retained assistant captures
+
+Set `PASTA_ASSISTANT_DATABASE` to the local SQLite attention/evidence store.
+`kb sync --source assistant` imports immutable versions through the existing
+Parquet/text/vector/graph pipeline. The knowledge MCP exposes the same operation
+as `sync_assistant_captures`, without model-controlled paths. This dedicated path
+does not write vault metadata. For other sync paths on a read-only NAS vault,
+set `[kb] write_vault_metadata = false`. Captures use source `vault` with original
+origin tags and stable `vault-assistant-<id>` references.
