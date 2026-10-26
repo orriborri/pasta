@@ -260,22 +260,19 @@ fn message_to_record(
         "gmail-thread-{:x}",
         Sha256::digest(serde_json::to_vec(&(account, &message.thread_id))?)
     );
-    let mut participants: Vec<_> = ["from", "to", "cc", "bcc"]
-        .iter()
-        .filter_map(|name| source.headers.get(*name))
-        .filter(|v| !v.is_empty())
-        .cloned()
-        .collect();
-    participants.sort();
-    participants.dedup();
+    let people = project_correspondents(&source.headers);
+    if people.partial {
+        tags.push("participants:partial".into());
+        tags.sort();
+    }
     Ok(Record {
         id: Record::make_id(Source::Gmail, &format!("message-{version}")),
         source: Source::Gmail,
         kind: Kind::Message,
         title: source.headers.get("subject").cloned().unwrap_or_default(),
         content,
-        author: source.headers.get("from").cloned().unwrap_or_default(),
-        participants,
+        author: people.author,
+        participants: people.participants,
         created_at: created,
         updated_at: created,
         url: format!(
@@ -287,6 +284,45 @@ fn message_to_record(
         entities: vec![],
         tags,
     })
+}
+
+struct Correspondents {
+    author: String,
+    participants: Vec<String>,
+    partial: bool,
+}
+
+fn project_correspondents(headers: &std::collections::HashMap<String, String>) -> Correspondents {
+    let mut projection = Correspondents {
+        author: String::new(),
+        participants: vec![],
+        partial: false,
+    };
+    for name in ["from", "to", "cc", "bcc"] {
+        let Some(value) = headers.get(name).filter(|value| !value.is_empty()) else {
+            continue;
+        };
+        let Ok(parsed) = mailparse::addrparse(value) else {
+            projection.partial = true;
+            continue;
+        };
+        let mut mailboxes = Vec::new();
+        for address in parsed.iter() {
+            match address {
+                mailparse::MailAddr::Single(mailbox) => mailboxes.push(mailbox.addr.clone()),
+                mailparse::MailAddr::Group(group) => {
+                    mailboxes.extend(group.addrs.iter().map(|mailbox| mailbox.addr.clone()));
+                }
+            }
+        }
+        if name == "from" && mailboxes.len() == 1 {
+            projection.author.clone_from(&mailboxes[0]);
+        }
+        projection.participants.extend(mailboxes);
+    }
+    projection.participants.sort();
+    projection.participants.dedup();
+    projection
 }
 
 fn encode_component(value: &str) -> String {

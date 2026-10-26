@@ -47,6 +47,11 @@ runtime's tool permissions separately; source content never authorizes actions.
   earlier evidence resolvable. The snapshot contains its native message identity;
   thread IDs are separately account-qualified for grouping. Sender subject/date
   coincidences cannot merge messages. Gmail URLs select the observed account.
+- Person projections parse mailbox lists (including quoted display names and
+  groups) into individual addresses. The author is projected only for a single
+  parsed From mailbox. Malformed address lists stay in original evidence and are
+  omitted from the graph projection, tagged `participants:partial`; comma-joined
+  headers never become a combined person entity.
 - `created_at` uses Gmail's `internalDate`, not the sender-written Date header.
   Gmail full-message output supplies no modification timestamp, so `updated_at`
   uses that same known timestamp. Pasta's ingestion-time change feed surfaces later

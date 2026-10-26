@@ -35,9 +35,7 @@ fn full_body_provider_payload_and_attachment_coverage_are_retained() {
     assert!(record.tags.contains(&"attachments:metadata-only".into()));
     assert!(record.tags.contains(&"Invoices".into()));
     assert!(record.url.contains("authuser=owner%40example.com#all/a1"));
-    assert!(record
-        .participants
-        .contains(&"Owner <owner@example.com>".into()));
+    assert!(record.participants.contains(&"owner@example.com".into()));
 }
 
 #[test]
@@ -253,4 +251,29 @@ else:
         assert!(fetcher.fetch(&harness.state).await.is_err());
         assert_eq!(harness.calls().len(), 1);
     }
+}
+
+#[test]
+fn mailbox_lists_project_individual_people_without_changing_original_headers() {
+    let mut full = full_message("a1", "Original body");
+    full["headers"]["to"] = json!("\"Family, Bob\" <bob@example.com>, Carol <carol@example.com>");
+    full["headers"]["cc"] = json!("Helpers: Dan <dan@example.com>, Eve <eve@example.com>;");
+    let record = message_to_record("owner@example.com", "a1", &[], full.clone()).unwrap();
+    assert_eq!(record.author, "alice@example.com");
+    assert_eq!(
+        record.participants,
+        [
+            "alice@example.com",
+            "bob@example.com",
+            "carol@example.com",
+            "dan@example.com",
+            "eve@example.com"
+        ]
+    );
+    let snapshot: Value = serde_json::from_str(&record.content).unwrap();
+    assert_eq!(snapshot["full_message"], full);
+    full["headers"]["bcc"] = json!("Broken <");
+    let partial = message_to_record("owner@example.com", "a1", &[], full).unwrap();
+    assert_eq!(partial.participants, record.participants);
+    assert!(partial.tags.contains(&"participants:partial".into()));
 }
