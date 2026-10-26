@@ -18,7 +18,7 @@ struct Cli {
 enum Cmd {
     /// Fetch from sources and store (Parquet → `LanceDB` + Tantivy)
     Sync {
-        /// Sources to sync: slack, gmail, linear, git, vault, calendar, gdocs, assistant (comma-separated, default: all)
+        /// Sources to sync: slack, gmail, linear, git, vault, calendar, gdocs, assistant, gmail-evidence (local replay; comma-separated, default: all)
         #[arg(short, long)]
         source: Option<String>,
     },

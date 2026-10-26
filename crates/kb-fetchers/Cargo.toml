@@ -16,6 +16,8 @@ tracing = { workspace = true }
 rusqlite = { workspace = true }
 sha2 = { workspace = true }
 mailparse = "0.18"
+base64 = "0.22"
+tempfile = "3"
 
 [dev-dependencies]
 pasta-assistant = { path = "../assistant" }

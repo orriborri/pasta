@@ -74,18 +74,19 @@ old messages outside that window, deletions, and old-message label-only changes
 are not covered. Existing generic sync logs a failed source and skips its window;
 check source warnings rather than treating zero new records as proof of coverage.
 
-`attachments:metadata-only` explicitly means attachment bytes were not downloaded
-or text-extracted. Inline bytes already present in the provider payload remain
-in that retained payload, but are not a separate attachment index. `body:decoded`
+The earlier metadata-only importer used `attachments:metadata-only`. Current
+live ingestion requires a durable store for messages with attachments and reports
+`attachments:retained`; each file has its own extraction status. Original inline bytes remain in the provider payload and are additionally retained as files when they are MIME attachments. `body:decoded`
 or `body:not-reported` describes the CLI's decoded body coverage; a missing body
 never falls back to a subject or snippet. HTML/MIME source remains in the payload.
 
-The v2 cursor is scoped by account and starts a fresh initial window. The legacy
+The v3 cursor is scoped by account and starts a fresh initial window. The legacy
 unscoped `gmail_forward` cursor is not trusted. Legacy subject/date IDs remain
 untouched, so search can temporarily contain overlapping legacy and new records.
 No automatic merge or deletion tries to guess their native identities.
 
-Follow-up slices: attachment-byte retention and extraction coverage, Gmail history
+Attachment-byte retention and bounded UTF-8 extraction are implemented in the
+linked retention slice. Follow-up slices: binary/PDF extraction, Gmail history
 sync/backfill, reviewed JDex classification, and approved/read-back-verified label
 writes that preserve unrelated labels. Live mailbox and NAS performance tests
 remain necessary before claiming production coverage.

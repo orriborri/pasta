@@ -133,6 +133,8 @@ pub struct BinaryConfig {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct GogConfig {
+    /// Durable Gmail originals, separate from disposable KB indexes.
+    pub gmail_evidence_dir: String,
     pub account: String,
     pub credentials_file: String,
     pub keyring_backend: String,
@@ -218,6 +220,7 @@ impl Default for NativeScheduleEntry {
 impl Default for GogConfig {
     fn default() -> Self {
         Self {
+            gmail_evidence_dir: String::new(),
             account: String::new(),
             credentials_file: String::new(),
             keyring_backend: "file".to_string(),

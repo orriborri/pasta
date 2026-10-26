@@ -279,3 +279,48 @@ fn assistant_capture_restart_import_retrieve_and_search_preserves_versions() {
     assert_eq!(page.records.len(), 2);
     assert!(page.records.iter().all(|r| !r.ingested_at.is_empty()));
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn gmail_attachment_originals_rebuild_search_after_projection_loss() {
+    use std::os::unix::fs::PermissionsExt;
+    let temp = TempConfig::new();
+    let executable = temp.dir.join("gog");
+    std::fs::write(&executable, r"#!/usr/bin/env python3
+import json, sys, base64
+if 'search' in sys.argv:
+    print(json.dumps({'messages':[{'id':'a1'}]}))
+else:
+    assert 'get' in sys.argv
+    data = b'call electrician'
+    print(json.dumps({'headers':{'subject':'Original mail'},'body':'Retained original message',
+      'message':{'id':'a1','threadId':'a1','internalDate':'1793012400000',
+        'payload':{'mimeType':'multipart/mixed','parts':[
+          {'partId':'1','filename':'../notes.txt','mimeType':'text/plain','body':{'size':len(data),'data':base64.urlsafe_b64encode(data).decode()}}]}}}))
+").unwrap();
+    std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let fetcher = kb_fetchers::gmail::GmailFetcher::new().with_account("owner@example.com")
+        .with_gog_executable(&executable).with_evidence_dir(temp.dir.join("originals"));
+    let config = KbConfig { data_dir: temp.dir.join("indexes") };
+    let state = kb_core::SyncState::open_staged(&config).unwrap();
+    let records = fetcher.fetch(&state).await.unwrap();
+    assert_eq!(records.len(), 2);
+    let attachment = records.iter().find(|record| record.kind == Kind::Doc).unwrap();
+    let attachment_id = attachment.id.clone();
+    let expected_content = attachment.content.clone();
+    ParquetStore::new(&config).write_changed(&records).unwrap();
+    state.commit_windows().unwrap();
+    drop(state);
+    std::fs::remove_dir_all(&config.data_dir).unwrap();
+    // No provider reads are possible now; only retained originals remain.
+    std::fs::remove_file(executable).unwrap();
+    let replay = fetcher.retained_records().unwrap();
+    ParquetStore::new(&config).write_changed(&replay).unwrap();
+    let text = kb_storage::TextIndex::open(&config).unwrap();
+    text.upsert(&replay).unwrap();
+    assert!(!text.search("electrician", 5).unwrap().is_empty());
+    let evidence = kb_query::get_evidence(&config, &[&attachment_id]).unwrap();
+    assert_eq!(evidence.len(), 1);
+    assert_eq!(evidence[0].content, expected_content);
+    assert!(!temp.dir.join("notes.txt").exists());
+}

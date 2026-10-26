@@ -9,3 +9,5 @@ mcp_servers:
       PASTA_ASSISTANT_DATABASE: /data/assistant.sqlite
       # Optional; an unset whole-variable reference is omitted by the pinned runtime.
       OPENAI_API_KEY: ${OPENAI_API_KEY}
+      # With gmail-evidence.compose.yaml, uncomment this for offline Gmail replay:
+      # PASTA_GMAIL_EVIDENCE_DIR: /evidence/gmail

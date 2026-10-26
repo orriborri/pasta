@@ -85,6 +85,7 @@ async fn fetch_outcome_with_lookback(
                     .with_calendar_ids(cal_ids)
                     .fetch(&state).await
             }
+            "gmail-evidence" => kb_fetchers::gmail::GmailFetcher::new().retained_records(),
             "assistant" => std::env::var_os("PASTA_ASSISTANT_DATABASE").map_or_else(|| Ok(vec![]), |p| kb_fetchers::assistant::fetch(Path::new(&p))),
             "gdocs" => kb_fetchers::gdocs::GdocsFetcher::new().fetch(&state).await,
             _ => continue,
@@ -124,6 +125,13 @@ pub async fn sync_assistant_captures() -> Result<usize> {
     let path = std::env::var_os("PASTA_ASSISTANT_DATABASE")
         .ok_or_else(|| anyhow::anyhow!("PASTA_ASSISTANT_DATABASE is required"))?;
     index_with_vault_writes(kb_fetchers::assistant::fetch(Path::new(&path))?, false).await
+}
+
+/// Rebuild Gmail search projections from verified local originals, without provider calls.
+/// # Errors
+/// Returns errors for missing/corrupt evidence or failed index writes.
+pub async fn sync_gmail_evidence() -> Result<usize> {
+    index_with_vault_writes(kb_fetchers::gmail::GmailFetcher::new().retained_records()?, false).await
 }
 
 async fn index_with_vault_writes(records: Vec<Record>, write_vault_metadata: bool) -> Result<usize> {
@@ -203,6 +211,7 @@ async fn complete_indexing(
 /// # Errors
 /// Returns error if fetching or indexing fails.
 pub async fn run(sources: &[&str]) -> Result<usize> {
+    if sources == ["gmail-evidence"] { return sync_gmail_evidence().await; }
     if sources == ["assistant"] { return sync_assistant_captures().await; }
     let records = fetch_with_lookback(sources, 30).await?;
     index(records).await

@@ -1,6 +1,10 @@
 //! Read-only Gmail ingestion. Each canonical full-message snapshot is retained
 //! independently; snippets are never substituted for original message bodies.
 use anyhow::{bail, Context, Result};
+use base64::{
+    engine::general_purpose::{URL_SAFE, URL_SAFE_NO_PAD},
+    Engine as _,
+};
 use chrono::{DateTime, Utc};
 use kb_core::{Kind, Record, Source, SyncState};
 use serde::Deserialize;
@@ -13,6 +17,7 @@ pub struct GmailFetcher {
     lookback_days: i64,
     account: Option<String>,
     executable: PathBuf,
+    evidence_dir: Option<PathBuf>,
 }
 
 impl Default for GmailFetcher {
@@ -28,7 +33,15 @@ impl GmailFetcher {
             lookback_days: 30,
             account: None,
             executable: "gog".into(),
+            evidence_dir: None,
         }
+    }
+
+    /// Select a pinned/operator-installed gog executable without changing process PATH.
+    #[must_use]
+    pub fn with_gog_executable(mut self, path: impl Into<PathBuf>) -> Self {
+        self.executable = path.into();
+        self
     }
 
     /// Select the actual mailbox email, rather than an implicit default or alias.
@@ -36,6 +49,41 @@ impl GmailFetcher {
     pub fn with_account(mut self, account: impl Into<String>) -> Self {
         self.account = Some(account.into());
         self
+    }
+
+    /// Set durable local NAS storage for original messages and attachment bytes.
+    #[must_use]
+    pub fn with_evidence_dir(mut self, path: impl Into<PathBuf>) -> Self {
+        self.evidence_dir = Some(path.into());
+        self
+    }
+
+    fn evidence_dir(&self) -> Option<PathBuf> {
+        self.evidence_dir
+            .clone()
+            .or_else(|| {
+                std::env::var_os("PASTA_GMAIL_EVIDENCE_DIR")
+                    .filter(|path| !path.is_empty())
+                    .map(PathBuf::from)
+            })
+            .or_else(|| {
+                let path = &pasta_common::config::get().gog.gmail_evidence_dir;
+                if path.is_empty() {
+                    None
+                } else {
+                    Some(PathBuf::from(path))
+                }
+            })
+    }
+
+    /// Replay verified originals into disposable Pasta indexes without Gmail access.
+    /// # Errors
+    /// Returns an error for missing configuration, incomplete/corrupt manifests or blobs.
+    pub fn retained_records(&self) -> Result<Vec<Record>> {
+        let root = self
+            .evidence_dir()
+            .context("configure [gog] gmail_evidence_dir or PASTA_GMAIL_EVIDENCE_DIR")?;
+        attachments::read_records(&root)
     }
 
     fn account(&self) -> Result<String> {
@@ -62,7 +110,7 @@ impl GmailFetcher {
     /// The caller must persist returned records before committing staged cursors.
     ///
     /// Coverage is bounded: initial 30 days plus a one-day replay overlap;
-    /// promotions/social are excluded. Attachment bytes are not downloaded.
+    /// promotions/social are excluded. Attachment originals require a configured durable evidence directory.
     /// # Errors
     /// Returns an error for missing account, failed commands, malformed responses,
     /// repeated pagination tokens, invalid source dates, or mismatched identities.
@@ -91,7 +139,7 @@ impl GmailFetcher {
         state.update_window(&key, &since.to_rfc3339(), &upper.to_rfc3339())?;
         info!(
             count = records.len(),
-            "Gmail full-message snapshots fetched; attachment metadata only"
+            "Gmail message and attachment evidence fetched"
         );
         Ok(records)
     }
@@ -134,12 +182,12 @@ impl GmailFetcher {
                     "--use-indexed-attachment-ids=false".into(),
                 ];
                 let full = self.request(account, &args).await?;
-                records.push(message_to_record(
-                    account,
-                    &message.id,
-                    &message.labels,
-                    full,
-                )?);
+                let parent =
+                    message_to_record(account, &message.id, &message.labels, full.clone())?;
+                records.extend(
+                    self.retain_message(account, &message.id, &full, parent)
+                        .await?,
+                );
             }
             match response.next_page_token.filter(|s| !s.is_empty()) {
                 Some(token) => {
@@ -152,6 +200,66 @@ impl GmailFetcher {
             }
         }
         Ok(records)
+    }
+
+    async fn retain_message(
+        &self,
+        account: &str,
+        message: &str,
+        full: &Value,
+        mut parent: Record,
+    ) -> Result<Vec<Record>> {
+        let parts = attachments::discover(full)?;
+        let Some(root) = self.evidence_dir() else {
+            if !parts.is_empty() {
+                bail!("Gmail attachments require [gog] gmail_evidence_dir or PASTA_GMAIL_EVIDENCE_DIR on durable local NAS storage");
+            }
+            parent.tags.retain(|tag| tag != "attachments:metadata-only");
+            parent.tags.push("attachments:none-reported".into());
+            parent.tags.sort();
+            return Ok(vec![parent]);
+        };
+        let store = attachments::EvidenceStore::open(&root)?;
+        let mut retained = Vec::new();
+        for part in parts {
+            let blob = if let Some(blob) = store.cached(account, message, &part)? {
+                blob
+            } else {
+                let pending = store.pending()?;
+                let destination = pending.path().join("download");
+                if let Some(id) = &part.attachment_id {
+                    if id.is_empty() || id.starts_with('-') || id.chars().any(char::is_control) {
+                        bail!("invalid Gmail attachment ID");
+                    }
+                    let args = vec![
+                        "gmail".into(),
+                        "attachment".into(),
+                        message.into(),
+                        id.clone(),
+                        "--out".into(),
+                        destination
+                            .to_str()
+                            .context("invalid attachment storage path")?
+                            .into(),
+                        "--use-indexed-attachment-ids=false".into(),
+                    ];
+                    self.request(account, &args).await?;
+                } else if let Some(data) = &part.inline_data {
+                    let bytes = URL_SAFE_NO_PAD
+                        .decode(data)
+                        .or_else(|_| URL_SAFE.decode(data))
+                        .context("invalid Gmail inline attachment base64")?;
+                    std::fs::write(&destination, bytes)?;
+                } else if part.size == Some(0) {
+                    std::fs::write(&destination, [])?;
+                } else {
+                    bail!("Gmail attachment has no retrievable bytes");
+                }
+                store.retain(account, message, &part, &destination)?
+            };
+            retained.push((part, blob));
+        }
+        store.finish(parent, retained)
     }
 
     async fn request(&self, account: &str, args: &[String]) -> Result<Value> {
@@ -191,7 +299,7 @@ impl GmailFetcher {
 }
 
 fn cursor_key(account: &str) -> String {
-    format!("gmail_forward:v2:{:x}", Sha256::digest(account.as_bytes()))
+    format!("gmail_forward:v3:{:x}", Sha256::digest(account.as_bytes()))
 }
 
 fn validate_id(id: &str) -> Result<()> {
@@ -370,3 +478,5 @@ struct ApiMessage {
 
 #[cfg(test)]
 mod tests;
+
+mod attachments;
