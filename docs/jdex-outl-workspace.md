@@ -69,10 +69,13 @@ Parquet, LanceDB, Tantivy and SQLite state are not part of that workspace and
 are not synchronized through outl. Use a single publishing worker and a
 persistent outl device identity on its host.
 
-Existing OneDrive files and Gmail messages remain where they are. A JDex entry
-can link to both without copying their bytes into outl. File migrations,
-mail labeling and removal remain separate operations requiring their own
-authorization.
+NAS files are the canonical local sources. If originals are still in
+OneDrive during setup, ingest them only as a temporary source until a verified
+copy is established on the NAS; then point the canonical record at the NAS
+path. Do not delete or alter the OneDrive copy as part of ingestion. Gmail
+remains an external evidence source and JDex can retain stable provider links.
+File migration, mail labeling and removal remain separate operations requiring
+their own authorization.
 
 ## Current code grounding
 
