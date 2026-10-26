@@ -169,3 +169,7 @@ Gmail attachment originals now use a separate durable evidence directory.
 [Configure retention and coverage](docs/gmail-attachment-retention.md);
 `kb sync --source gmail-evidence` rebuilds search from verified local originals
 without Gmail calls. The knowledge MCP offers `sync_gmail_evidence`.
+
+[Reviewed JDex Gmail labels](docs/jdex-gmail-label-actions.md) provides
+classification proposals and an operator-approved label writer through the shared
+assistant action journal. Registry membership does not grant label-write permission.

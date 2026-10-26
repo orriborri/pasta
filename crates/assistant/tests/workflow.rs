@@ -137,6 +137,15 @@ fn mcp_exposes_shared_attention_tools_over_stdio() {
     assert!(names.contains(&"capture"));
     assert!(names.contains(&"next_actions"));
     assert!(names.contains(&"complete_task"));
+    assert!(names.contains(&"gmail_label_preview"));
+    assert!(!names.contains(&"gmail_label_approve"));
+    assert!(!names.contains(&"approve_gmail_label"));
+    writeln!(input, "{}", serde_json::json!({"jsonrpc":"2.0","id":90,"method":"tools/call","params":{"name":"gmail_label_apply","arguments":{"id":"unapproved"}}})).unwrap();
+    input.flush().unwrap();
+    line.clear();
+    output.read_line(&mut line).unwrap();
+    assert!(line.contains("disabled"), "{line}");
+
     writeln!(input, "{}", serde_json::json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"capture","arguments":{"source":"telegram","source_id":"owner-chat/message","content":"verbatim memo"}}})).unwrap();
     input.flush().unwrap();
     line.clear();
