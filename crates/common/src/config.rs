@@ -147,6 +147,8 @@ pub struct GogConfig {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct KbSection {
+    /// Permit entity/discovery note writes to the vault.
+    pub write_vault_metadata: bool,
     pub data_dir: String,
     // Fetch sources are hardcoded per call site (fetch_cycle.rs / commands.rs);
     // there is no config-driven source list, so no `sources`/`sync_on_fetch` here.
@@ -229,6 +231,7 @@ impl Default for GogConfig {
 impl Default for KbSection {
     fn default() -> Self {
         Self {
+            write_vault_metadata: true,
             data_dir: dirs::home_dir().unwrap().join(".kb").to_string_lossy().to_string(),
             internal_domains: vec!["@readpeak.com".into()],
             internal_slack: true,

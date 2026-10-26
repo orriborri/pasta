@@ -2,7 +2,7 @@ mod mcp;
 use anyhow::{bail, Result};
 use chrono::{DateTime, Utc};
 use clap::{Parser, Subcommand};
-use pasta_assistant::{Registry, Store};
+use pasta_assistant::{Registry, Store, TaskEdit};
 use std::{io::Read, path::PathBuf};
 
 #[derive(Parser)]
@@ -54,6 +54,14 @@ enum Command {
         #[arg(long)]
         at: Option<DateTime<Utc>>,
     },
+    /// Read a full desired `TaskEdit` JSON object from stdin.
+    Edit,
+    Get {
+        id: i64,
+    },
+    Backup {
+        destination: PathBuf,
+    },
     Done {
         id: i64,
     },
@@ -85,7 +93,8 @@ async fn main() -> Result<()> {
             if text.len() > 10 * 1024 * 1024 {
                 bail!("capture exceeds 10 MiB");
             }
-            serde_json::json!({"evidence_id":store.capture(&source,&source_id,&text)?})
+            let id = store.capture(&source, &source_id, &text)?;
+            serde_json::json!({"evidence_id":id,"pasta_record_id":format!("vault-assistant-{id}"),"retained":true,"indexing":"not_verified"})
         }
         Command::Evidence { id } => store.evidence(&id)?,
         Command::Task {
@@ -114,8 +123,22 @@ async fn main() -> Result<()> {
                 priority,
             )?)?
         }
-        Command::Next { limit, at } => {
-            serde_json::json!({"tasks":store.next(at.unwrap_or_else(Utc::now),limit)?,"ranking":"overdue, due within 24h, priority, due date, ID"})
+        Command::Next { limit, at } => store.recommendations(at.unwrap_or_else(Utc::now), limit)?,
+        Command::Edit => {
+            let mut text = String::new();
+            std::io::stdin()
+                .take(1024 * 1024 + 1)
+                .read_to_string(&mut text)?;
+            if text.len() > 1024 * 1024 {
+                bail!("edit exceeds 1 MiB");
+            }
+            let edit: TaskEdit = serde_json::from_str(&text)?;
+            serde_json::to_value(store.edit_task(&edit)?)?
+        }
+        Command::Get { id } => serde_json::to_value(store.task(id)?)?,
+        Command::Backup { destination } => {
+            store.backup(&destination)?;
+            serde_json::json!({"backup":destination})
         }
         Command::Done { id } => {
             store.done(id)?;

@@ -6,3 +6,5 @@ pub mod git;
 pub mod vault;
 pub mod calendar;
 pub mod gdocs;
+
+pub mod assistant;

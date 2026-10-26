@@ -1,0 +1,7 @@
+# Merge into the pinned runtime's /opt/data/config.yaml.
+mcp_servers:
+  pasta-attention:
+    command: /usr/local/bin/pasta-assistant
+    args: [--database, /data/assistant.sqlite, mcp, --registry, /vault/jdex-registry.json]
+  pasta-knowledge:
+    command: /usr/local/bin/kb-mcp

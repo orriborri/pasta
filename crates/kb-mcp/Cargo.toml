@@ -8,6 +8,7 @@ name = "kb-mcp"
 path = "src/main.rs"
 
 [dependencies]
+kb-sync = { path = "../kb-sync" }
 kb-core = { path = "../kb-core" }
 kb-storage = { path = "../kb-storage" }
 kb-query = { path = "../kb-query" }

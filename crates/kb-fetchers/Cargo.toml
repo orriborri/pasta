@@ -13,5 +13,11 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
 
+rusqlite = { workspace = true }
+sha2 = { workspace = true }
+
+[dev-dependencies]
+pasta-assistant = { path = "../assistant" }
+
 [lints]
 workspace = true

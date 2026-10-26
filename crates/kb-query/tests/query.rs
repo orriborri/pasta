@@ -253,3 +253,29 @@ fn late_arrival_and_same_timestamp_edit_are_visible_after_cursor() {
     assert_eq!(evidence.len(), 1);
     assert_eq!(evidence[0].content, "Edited without changing source timestamp");
 }
+
+#[test]
+fn assistant_capture_restart_import_retrieve_and_search_preserves_versions() {
+    let temp = TempConfig::new();
+    let path = temp.dir.join("assistant.sqlite");
+    let store = pasta_assistant::Store::open(&path).unwrap();
+    let id = store.capture("telegram", "owner/chat/message", "Call the electrician").unwrap();
+    store.capture("telegram", "owner/chat/message", "Call the plumber instead").unwrap();
+    drop(store);
+    let records = kb_fetchers::assistant::fetch(&path).unwrap();
+    let parquet = ParquetStore::new(&temp.config);
+    parquet.write_changed(&records).unwrap();
+    parquet.write_changed(&records).unwrap();
+    assert_eq!(parquet.read_all_ingested().unwrap().len(), 2);
+    let record_id = format!("vault-assistant-{id}");
+    let evidence = kb_query::get_evidence(&temp.config, &[&record_id]).unwrap();
+    assert_eq!(evidence.len(), 1);
+    assert_eq!(evidence[0].content, "Call the electrician");
+    assert_eq!(evidence[0].url, format!("assistant:evidence:{id}"));
+    let text = kb_storage::TextIndex::open(&temp.config).unwrap();
+    text.upsert(&records).unwrap();
+    assert!(!text.search("electrician", 5).unwrap().is_empty());
+    let page = kb_query::get_changes(&temp.config, None, Some("vault"), 10).unwrap();
+    assert_eq!(page.records.len(), 2);
+    assert!(page.records.iter().all(|r| !r.ingested_at.is_empty()));
+}

@@ -32,7 +32,7 @@ Repeat for at most $PAGES change pages:
 4. For each job, follow prompts/maintain.md (you may query pasta-kb MCP for evidence) and write one patch JSON to $RUN/.
 5. vault.py validate each patch against plan-N.json. If any patch fails validation, stop the whole run without advancing and print the validator output.
 6. vault.py apply each validated patch.
-7. Only after every job on this page is applied: vault.py advance --wiki $WIKI --changes $RUN/page-N.json --allow-partial.
+7. Only after every job on this page has an apply or explicit skip receipt: vault.py advance --wiki $WIKI --changes $RUN/page-N.json --plan $RUN/plan-N.json.
 8. Stop if the page had has_more=false.
 
 Do not write anything outside $WIKI and $RUN. Do not edit canonical JDex originals; use enabled JD IDs for generated proposals. End with one line: pages processed, patches applied, patches rejected, final cursor."

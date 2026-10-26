@@ -153,3 +153,148 @@ fn mcp_exposes_shared_attention_tools_over_stdio() {
     child.wait().unwrap();
     std::fs::remove_file(path).unwrap();
 }
+
+#[test]
+fn task_lifecycle_survives_restore_and_rejects_stale_or_cyclic_edits() {
+    use pasta_assistant::TaskEdit;
+    let mut store = Store::open(Path::new(":memory:")).unwrap();
+    let evidence = store
+        .capture("telegram", "owner/chat/99", "Call electrician")
+        .unwrap();
+    let task = store
+        .add_task("create", "Call electrician", &evidence, None, None, 1)
+        .unwrap();
+    let mut edit = TaskEdit {
+        request_key: "defer".into(),
+        task_id: task.id,
+        expected_revision: 0,
+        title: "Call electrician on Tuesday".into(),
+        due_at: None,
+        priority: 2,
+        status: "deferred".into(),
+        deferred_until: Some("2026-10-27T09:00:00+02:00".into()),
+        waiting_reason: None,
+        blocked_by: None,
+    };
+    let deferred = store.edit_task(&edit).unwrap();
+    assert_eq!(store.edit_task(&edit).unwrap().revision, deferred.revision);
+    let before = Utc.with_ymd_and_hms(2026, 10, 26, 12, 0, 0).unwrap();
+    assert!(store.next(before, 5).unwrap().is_empty());
+    let after = Utc.with_ymd_and_hms(2026, 10, 28, 12, 0, 0).unwrap();
+    assert_eq!(store.next(after, 5).unwrap().len(), 1);
+    edit.request_key = "stale".into();
+    assert!(store.edit_task(&edit).is_err());
+    edit.expected_revision = 1;
+    edit.blocked_by = Some(task.id);
+    assert!(store.edit_task(&edit).is_err());
+    edit.blocked_by = None;
+    edit.status = "waiting".into();
+    edit.deferred_until = None;
+    assert!(store.edit_task(&edit).is_err());
+    edit.waiting_reason = Some("Electrician reply".into());
+    store.edit_task(&edit).unwrap();
+    assert!(store.next(after, 5).unwrap().is_empty());
+    for (revision, status) in [(2, "canceled"), (3, "open")] {
+        edit.request_key = status.into();
+        edit.expected_revision = revision;
+        edit.status = status.into();
+        edit.waiting_reason = None;
+        store.edit_task(&edit).unwrap();
+    }
+    let backup =
+        std::env::temp_dir().join(format!("assistant-restore-{}.sqlite", std::process::id()));
+    let _ = std::fs::remove_file(&backup);
+    store.backup(&backup).unwrap();
+    assert!(store.backup(&backup).is_err());
+    let mut restored = Store::open(&backup).unwrap();
+    assert_eq!(restored.task(task.id).unwrap().revision, 4);
+    assert_eq!(
+        restored.evidence(&evidence).unwrap()["content"],
+        "Call electrician"
+    );
+    restored.done(task.id).unwrap();
+    assert!(restored.next(after, 5).unwrap().is_empty());
+    assert_eq!(store.next(after, 5).unwrap().len(), 1);
+    drop(restored);
+    std::fs::remove_file(backup).unwrap();
+}
+
+#[test]
+fn mcp_task_edit_and_cli_read_share_one_register() {
+    use std::io::{BufRead, BufReader, Write};
+    use std::process::{Command, Stdio};
+    let path = std::env::temp_dir().join(format!("pasta-mcp-edit-{}.sqlite", std::process::id()));
+    let _ = std::fs::remove_file(&path);
+    let mut child = Command::new(env!("CARGO_BIN_EXE_pasta-assistant"))
+        .args(["--database", path.to_str().unwrap(), "mcp"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut input = child.stdin.take().unwrap();
+    let mut output = BufReader::new(child.stdout.take().unwrap());
+    {
+        let mut call = |request: serde_json::Value| {
+            writeln!(input, "{request}").unwrap();
+            input.flush().unwrap();
+            let mut line = String::new();
+            output.read_line(&mut line).unwrap();
+            serde_json::from_str::<serde_json::Value>(&line).unwrap()
+        };
+        call(
+            serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"lifecycle","version":"1"}}}),
+        );
+    }
+    // Notifications produce no response.
+    writeln!(
+        input,
+        "{}",
+        serde_json::json!({"jsonrpc":"2.0","method":"notifications/initialized"})
+    )
+    .unwrap();
+    let mut call = |id: u64, name: &str, args: serde_json::Value| {
+        writeln!(input, "{}", serde_json::json!({"jsonrpc":"2.0","id":id,"method":"tools/call","params":{"name":name,"arguments":args}})).unwrap();
+        input.flush().unwrap();
+        let mut line = String::new();
+        output.read_line(&mut line).unwrap();
+        let response: serde_json::Value = serde_json::from_str(&line).unwrap();
+        assert!(response["result"]["isError"] != true, "{response}");
+        response["result"]["structuredContent"]["result"].clone()
+    };
+    let capture = call(
+        2,
+        "capture",
+        serde_json::json!({"source":"telegram","source_id":"owner/chat/42","content":"Call back"}),
+    );
+    assert_eq!(capture["indexing"], "not_verified");
+    let task = call(
+        3,
+        "add_task",
+        serde_json::json!({"request_key":"mcp-create","title":"Call back","evidence_id":capture["evidence_id"],"priority":1}),
+    );
+    let edit = serde_json::json!({"request_key":"mcp-defer","task_id":task["id"],"expected_revision":0,"title":"Call tomorrow","priority":2,"status":"deferred","deferred_until":"2099-01-01T10:00:00+02:00"});
+    let revised = call(4, "edit_task", edit.clone());
+    assert_eq!(call(5, "edit_task", edit), revised);
+    assert_eq!(
+        call(6, "next_actions", serde_json::json!({}))["items"]
+            .as_array()
+            .unwrap()
+            .len(),
+        0
+    );
+    child.kill().unwrap();
+    child.wait().unwrap();
+    let cli = Command::new(env!("CARGO_BIN_EXE_pasta-assistant"))
+        .args([
+            "--database",
+            path.to_str().unwrap(),
+            "get",
+            task["id"].as_i64().unwrap().to_string().as_str(),
+        ])
+        .output()
+        .unwrap();
+    assert!(cli.status.success());
+    let fetched: serde_json::Value = serde_json::from_slice(&cli.stdout).unwrap();
+    assert_eq!(fetched, revised);
+    std::fs::remove_file(path).unwrap();
+}

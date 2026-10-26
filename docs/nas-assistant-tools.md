@@ -17,8 +17,11 @@ are performed by this binary.
   automatically establish an evidence retention policy.
 - Pasta's existing knowledge store/search MCP remains separate. The CLI's
   evidence IDs resolve through `pasta-assistant evidence`, not `pasta:evidence:`.
-  Feeding these captures into kb-engine is a later integration; do not invent
-  citations that pretend it has happened.
+  The capture bridge now imports each immutable version as `vault-assistant-<id>`.
+  Set `PASTA_ASSISTANT_DATABASE` and run `kb sync --source assistant`, or invoke
+  `sync_assistant_captures` through the knowledge MCP server. Capture and indexing
+  have separate outcomes; retries read retained versions after indexing failures.
+  This dedicated sync path never writes entity/discovery metadata to the vault.
 
 ## Local example
 
@@ -114,3 +117,29 @@ The server has no HTTP listener or standalone authentication; the local runtime
 must authenticate the owner (for example, Telegram user allowlisting) and gate
 mutating tools accordingly. Tool descriptions are guidance, not an enforcement
 boundary. Do not grant these tools to a public/untrusted agent session.
+
+## Task lifecycle and recovery
+
+`get TASK_ID` returns the current revision. `edit` reads a full JSON desired state
+from stdin; MCP exposes the same `get_task` and `edit_task` operations. Example:
+
+```json
+{"request_key":"owner-message42-defer","task_id":1,"expected_revision":0,"title":"Call electrician","due_at":null,"priority":2,"status":"deferred","deferred_until":"2026-10-27T09:00:00+02:00","waiting_reason":null,"blocked_by":null}
+```
+
+States are `open`, `deferred`, `waiting`, `done`, and `canceled`. Reopen by editing
+back to `open`; clear deferred_until outside `deferred`. Waiting requires a reason
+or an existing dependency. Cycles and stale revisions fail atomically. Every
+successful edit retains an audit revision; identical retry keys return the saved
+result and conflicting payloads fail. Existing task evidence/JDex links persist.
+Elapsed deferrals become eligible again; waiting/canceled/done tasks and tasks
+whose dependency is unfinished are omitted. `next`/`next_actions` return `items`
+with each task, reason, evidence reference, and Pasta record ID.
+
+`backup DESTINATION` creates a consistent SQLite copy and refuses overwrite.
+Open that copy using `--database DESTINATION` to rehearse restore; restore the
+production file only with services stopped. Search indexes remain disposable.
+
+[Hermes runtime trial](../deploy/synology/hermes/README.md) supplies a concrete
+container/MCP setup and the same acceptance scenarios for Hermes/OpenClaw.
+This does not complete live Telegram/NAS acceptance or choose a runtime.

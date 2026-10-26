@@ -13,6 +13,8 @@ serde = { workspace = true }
 schemars = { version = "1", features = ["chrono04"] }
 
 [dev-dependencies]
+pasta-assistant = { path = "../assistant" }
+kb-fetchers = { path = "../kb-fetchers" }
 tokio = { workspace = true }
 
 [lints]
