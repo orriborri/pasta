@@ -12,5 +12,9 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
 
+rmcp = { version = "1.7", features = ["server", "transport-io"] }
+schemars = { version = "1", features = ["chrono04"] }
+tokio = { workspace = true }
+
 [lints]
 workspace = true

@@ -23,7 +23,7 @@ are performed by this binary.
 ## Local example
 
 ```sh
-cargo build -p pasta-assistant
+cargo install --path crates/assistant --locked
 printf '%s' 'Please call the electrician tomorrow.' | pasta-assistant \
   --database ./assistant.sqlite capture --source telegram --source-id chat42/message17
 ```
@@ -85,3 +85,32 @@ file moves are not implemented here. They should use this shared attention
 register rather than maintaining another task list. Only an authenticated owner
 channel may invoke task mutations; untrusted email/document content is evidence,
 not authority to create tasks, finish them, or approve external actions.
+
+## Connect an existing agent over MCP
+
+Run `pasta-assistant --database /data/assistant.sqlite mcp` as a local stdio MCP
+server. It exposes `capture`, `evidence`, `add_task`, `next_actions`, and
+`complete_task` against the same register the CLI uses. Add
+`--registry /vault/path/to/jdex-registry.json` after `mcp` to enable JD ID
+validation. The database and registry paths are operator configuration, never
+model-controlled tool arguments.
+
+An MCP client configuration can launch the installed binary:
+
+```json
+{
+  "mcpServers": {
+    "pasta-attention": {
+      "command": "pasta-assistant",
+      "args": ["--database", "/data/assistant.sqlite", "mcp", "--registry", "/vault/jdex-registry.json"]
+    }
+  }
+}
+```
+
+For the one-shot Docker service, use `docker compose ... run --rm -T
+assistant-tools mcp ...` as the stdio command from a trusted host adapter.
+The server has no HTTP listener or standalone authentication; the local runtime
+must authenticate the owner (for example, Telegram user allowlisting) and gate
+mutating tools accordingly. Tool descriptions are guidance, not an enforcement
+boundary. Do not grant these tools to a public/untrusted agent session.

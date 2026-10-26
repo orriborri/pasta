@@ -1,3 +1,4 @@
+mod mcp;
 use anyhow::{bail, Result};
 use chrono::{DateTime, Utc};
 use clap::{Parser, Subcommand};
@@ -14,6 +15,11 @@ struct Cli {
 }
 #[derive(Subcommand)]
 enum Command {
+    /// Serve tools over local MCP stdio for an authenticated assistant runtime.
+    Mcp {
+        #[arg(long)]
+        registry: Option<PathBuf>,
+    },
     /// Capture UTF-8 evidence from stdin (does not create a task).
     Capture {
         #[arg(long)]
@@ -55,7 +61,8 @@ enum Command {
         path: PathBuf,
     },
 }
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     let cli = Cli::parse();
     if let Command::RegistryCheck { path } = &cli.command {
         let registry = Registry::load(path)?;
@@ -64,6 +71,9 @@ fn main() -> Result<()> {
             serde_json::json!({"valid":true,"entries":registry.entries.len()})
         );
         return Ok(());
+    }
+    if let Command::Mcp { registry } = &cli.command {
+        return mcp::run(cli.database, registry.clone()).await;
     }
     let mut store = Store::open(&cli.database)?;
     let result = match cli.command {
@@ -111,7 +121,7 @@ fn main() -> Result<()> {
             store.done(id)?;
             serde_json::json!({"id":id,"status":"done"})
         }
-        Command::RegistryCheck { .. } => unreachable!(),
+        Command::RegistryCheck { .. } | Command::Mcp { .. } => unreachable!(),
     };
     println!("{}", serde_json::to_string(&result)?);
     Ok(())
