@@ -18,8 +18,8 @@ class WikiToolkitTests(unittest.TestCase):
         plan = wiki.build_plan(root, changes)
         job = plan["jobs"][0]
         patch = {"version": 1, "job_id": job["job_id"], "operation": "upsert",
-                 "page": "Projects/X.md", "evidence_record_ids": ["r1"],
-                 "content": "---\nentities:\n  - project:x\n---\n\nFact [source](pasta:evidence:r1)\n"}
+                 "page": ".llm-wiki/generated/Projects/X.md", "evidence_record_ids": ["r1"],
+                 "content": "---\nllm_wiki: 1\nentities:\n  - project:x\n---\n\nFact [source](pasta:evidence:r1)\n"}
         return changes, plan, patch
 
     def test_symlink_escape_is_rejected_without_writing(self):
@@ -28,7 +28,8 @@ class WikiToolkitTests(unittest.TestCase):
             root.mkdir()
             outside = Path(td) / "outside"
             outside.mkdir()
-            (root / "Projects").symlink_to(outside, target_is_directory=True)
+            (root / ".llm-wiki/generated").mkdir(parents=True)
+            (root / ".llm-wiki/generated/Projects").symlink_to(outside, target_is_directory=True)
             _, plan, patch = self.make_plan(root)
             self.assertTrue(wiki.validate_patch(root, plan, patch))
             with self.assertRaises(wiki.WikiError):
@@ -38,18 +39,19 @@ class WikiToolkitTests(unittest.TestCase):
     def test_unrelated_page_cannot_be_overwritten(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
-            target = root / "Other.md"
+            target = root / ".llm-wiki/generated/Other.md"
+            target.parent.mkdir(parents=True)
             target.write_text("---\nentities:\n  - project:y\n---\nUnrelated page\n")
             _, plan, patch = self.make_plan(root)
-            patch["page"] = "Other.md"
+            patch["page"] = ".llm-wiki/generated/Other.md"
             self.assertTrue(wiki.validate_patch(root, plan, patch))
             self.assertIn("Unrelated page", target.read_text())
 
     def test_edit_since_planning_is_preserved(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
-            target = root / "Projects/X.md"
-            target.parent.mkdir()
+            target = root / ".llm-wiki/generated/Projects/X.md"
+            target.parent.mkdir(parents=True)
             target.write_text("---\nentities:\n  - project:x\n---\nOriginal\n")
             _, plan, patch = self.make_plan(root)
             target.write_text("My newer manual edit\n")
@@ -99,10 +101,11 @@ class WikiToolkitTests(unittest.TestCase):
     def test_removed_mention_still_schedules_existing_page(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
-            (root / "Old.md").write_text("---\nentities:\n  - project:old\n---\n[source](pasta:evidence:r1)\n")
+            (root / ".llm-wiki/generated").mkdir(parents=True)
+            (root / ".llm-wiki/generated/Old.md").write_text("---\nentities:\n  - project:old\n---\n[source](pasta:evidence:r1)\n")
             _, plan, _ = self.make_plan(root)
             job = next(job for job in plan["jobs"] if job["entity"] == "project:old")
-            self.assertEqual(job["candidate_pages"], ["Old.md"])
+            self.assertEqual(job["candidate_pages"], [".llm-wiki/generated/Old.md"])
 
     def test_state_directory_symlink_is_rejected(self):
         with tempfile.TemporaryDirectory() as td:
