@@ -15,6 +15,10 @@ Sources: [upstream Docker setup](https://github.com/NousResearch/hermes-agent/bl
    indexes; grant the configured UID/GID access. Mount JDex originals read-only.
    Databases must stay on local NAS storage, never SMB/NFS.
 3. Merge mcp-config.example.yaml into the Hermes state directory's config.yaml.
+   Hermes filters MCP subprocess environments, so keep the explicit database path
+   in `pasta-knowledge.env`. The optional OPENAI_API_KEY reference forwards a
+   provider key for Pasta embeddings; without one, Pasta uses its local fallback.
+   Measure that model on the NAS during the trial. Never put a literal key in git.
    Install pasta-config.example.toml as `.pasta/config.toml` beneath the runtime
    process HOME (currently /opt/data). Verify that path in the pinned image.
 4. Configure the model/provider using upstream setup; put credentials in a private

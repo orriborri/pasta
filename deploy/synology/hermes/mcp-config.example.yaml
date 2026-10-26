@@ -5,3 +5,7 @@ mcp_servers:
     args: [--database, /data/assistant.sqlite, mcp, --registry, /vault/jdex-registry.json]
   pasta-knowledge:
     command: /usr/local/bin/kb-mcp
+    env:
+      PASTA_ASSISTANT_DATABASE: /data/assistant.sqlite
+      # Optional; an unset whole-variable reference is omitted by the pinned runtime.
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
