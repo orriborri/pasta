@@ -2815,6 +2815,7 @@ name = "kb-fetchers"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "base64",
  "chrono",
  "kb-core",
  "mailparse",
@@ -2824,6 +2825,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "tempfile",
  "tokio",
  "tracing",
 ]

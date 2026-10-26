@@ -164,3 +164,8 @@ Gmail now imports account-qualified full-message evidence snapshots rather than
 subject/date snippets. See [Gmail evidence import](docs/gmail-evidence-import.md)
 for account configuration, cursor migration and explicit attachment/history
 coverage limits. This is read-only ingestion; JDex label writes are a later slice.
+
+Gmail attachment originals now use a separate durable evidence directory.
+[Configure retention and coverage](docs/gmail-attachment-retention.md);
+`kb sync --source gmail-evidence` rebuilds search from verified local originals
+without Gmail calls. The knowledge MCP offers `sync_gmail_evidence`.

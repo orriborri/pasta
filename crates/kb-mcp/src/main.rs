@@ -69,7 +69,7 @@ struct TimelineParams {
 }
 
 #[derive(Debug, serde::Serialize, schemars::JsonSchema)]
-struct AssistantSyncResponse {
+struct IndexSyncResponse {
     indexed_records: usize,
 }
 
@@ -113,10 +113,16 @@ struct KbServer;
 // rmcp routes tools through instance methods, including stateless handlers.
 #[allow(clippy::unused_self)]
 impl KbServer {
+    #[tool(description = "Rebuild Gmail indexes from verified retained local messages and attachment originals. Uses operator-configured evidence paths, makes no Gmail calls, and never writes vault metadata. Unsupported attachment formats remain metadata-only search records.")]
+    async fn sync_gmail_evidence(&self) -> Result<Json<IndexSyncResponse>, ErrorData> {
+        let count = kb_sync::sync_gmail_evidence().await.map_err(|e| query_err(&e))?;
+        Ok(Json(IndexSyncResponse { indexed_records: count }))
+    }
+
     #[tool(description = "Import retained assistant captures into Pasta indexes. Uses operator-configured paths and never writes vault metadata. Failure does not mean indexing succeeded.")]
-    async fn sync_assistant_captures(&self) -> Result<Json<AssistantSyncResponse>, ErrorData> {
+    async fn sync_assistant_captures(&self) -> Result<Json<IndexSyncResponse>, ErrorData> {
         let count = kb_sync::sync_assistant_captures().await.map_err(|e| query_err(&e))?;
-        Ok(Json(AssistantSyncResponse { indexed_records: count }))
+        Ok(Json(IndexSyncResponse { indexed_records: count }))
     }
 
     #[tool(

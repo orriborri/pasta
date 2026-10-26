@@ -1,0 +1,7 @@
+# Optional overlay for durable Gmail originals, separate from /kb projections.
+services:
+  assistant:
+    environment:
+      PASTA_GMAIL_EVIDENCE_DIR: /evidence/gmail
+    volumes:
+      - ${PASTA_GMAIL_EVIDENCE:?Set a dedicated local NAS originals directory}:/evidence/gmail

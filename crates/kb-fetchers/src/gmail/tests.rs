@@ -1,7 +1,7 @@
 use super::*;
 use serde_json::json;
 
-fn full_message(id: &str, body: &str) -> Value {
+pub(super) fn full_message(id: &str, body: &str) -> Value {
     json!({
         "message": {"id":id,"threadId":"abc123","internalDate":"1793012400000",
             "historyId":"42","labelIds":["INBOX","Label_1"],
@@ -153,6 +153,16 @@ if 'search' in args:
         print(json.dumps({'messages': [{'id':'a1'}, {'id':'b2','labels':['Invoices']}], 'nextPageToken': 'next' if mode == 'repeat' else ''}))
     else:
         print(json.dumps({'messages': [{'id':'a1','labels':['Invoices']}], 'nextPageToken':'next'}))
+elif 'attachment' in args:
+    assert args[5:7] == ['gmail', 'attachment']
+    assert '--use-indexed-attachment-ids=false' in args
+    if mode == 'fail_attachment' and args[7] == 'b2':
+        print('injected attachment failure', file=sys.stderr)
+        sys.exit(1)
+    destination = pathlib.Path(args[args.index('--out') + 1])
+    assert not destination.exists()
+    destination.write_bytes(b'original PDF data')
+    print(json.dumps({'path':'untrusted-path-must-not-be-used','bytes':17}))
 elif 'get' in args:
     assert args[5:7] == ['gmail', 'get']
     assert args[args.index('--format') + 1] == 'full'
@@ -161,7 +171,10 @@ elif 'get' in args:
     if mode == 'fail_get' and message_id == 'b2':
         print('injected provider failure', file=sys.stderr)
         sys.exit(1)
-    print(json.dumps(json.loads((root / 'messages.json').read_text())[message_id]))
+    result = json.loads((root / 'messages.json').read_text())[message_id]
+    if mode == 'missing_bytes':
+        result['message']['payload']['parts'][1]['body'] = {}
+    print(json.dumps(result))
 else:
     raise AssertionError('unexpected command, no mailbox mutations permitted')
 ").unwrap();
@@ -173,7 +186,9 @@ else:
             Self { directory, state }
         }
         fn fetcher(&self) -> GmailFetcher {
-            let mut fetcher = GmailFetcher::new().with_account("OWNER@example.com");
+            let mut fetcher = GmailFetcher::new()
+                .with_account("OWNER@example.com")
+                .with_evidence_dir(self.directory.join("originals"));
             fetcher.executable = self.directory.join("gog");
             fetcher
         }
@@ -199,10 +214,10 @@ else:
             .update_window("gmail_forward", "2099/01/01", "2099/01/02")
             .unwrap();
         let records = harness.fetcher().fetch(&harness.state).await.unwrap();
-        assert_eq!(records.len(), 2);
+        assert_eq!(records.len(), 4);
         assert_ne!(records[0].id, records[1].id);
         let calls = harness.calls();
-        assert_eq!(calls.len(), 4); // Two search pages, two full gets; duplicate a1 skipped.
+        assert_eq!(calls.len(), 6); // Two pages, two full gets and two attachment downloads.
         let key = cursor_key("owner@example.com");
         assert!(harness.state.cursor(&key).is_none());
         // Production kb-sync persists records before committing this stage.
@@ -216,7 +231,13 @@ else:
 
     #[tokio::test]
     async fn failures_on_later_messages_or_pagination_leave_cursor_retryable() {
-        for mode in ["fail_get", "repeat", "malformed"] {
+        for mode in [
+            "fail_get",
+            "fail_attachment",
+            "missing_bytes",
+            "repeat",
+            "malformed",
+        ] {
             let harness = Harness::new(mode);
             assert!(harness.fetcher().fetch(&harness.state).await.is_err());
             harness.state.commit_windows().unwrap();
@@ -227,9 +248,59 @@ else:
             std::fs::write(harness.directory.join("mode"), "ok").unwrap();
             assert_eq!(
                 harness.fetcher().fetch(&harness.state).await.unwrap().len(),
-                2
+                4
             );
         }
+    }
+
+    #[tokio::test]
+    async fn attachment_retry_and_local_replay_preserve_originals_and_coverage() {
+        let harness = Harness::new("fail_attachment");
+        let fetcher = harness.fetcher();
+        assert!(fetcher.fetch(&harness.state).await.is_err());
+        assert_eq!(fetcher.retained_records().unwrap().len(), 2);
+        std::fs::write(harness.directory.join("mode"), "ok").unwrap();
+        let records = fetcher.fetch(&harness.state).await.unwrap();
+        let restored = fetcher.retained_records().unwrap();
+        let mut original_hashes: Vec<_> = records.iter().map(Record::content_hash).collect();
+        let mut restored_hashes: Vec<_> = restored.iter().map(Record::content_hash).collect();
+        original_hashes.sort();
+        restored_hashes.sort();
+        assert_eq!(original_hashes, restored_hashes);
+        let documents: Vec<_> = restored
+            .iter()
+            .filter(|record| record.kind == Kind::Doc)
+            .collect();
+        assert_eq!(documents.len(), 2);
+        assert_ne!(documents[0].id, documents[1].id);
+        assert!(documents
+            .iter()
+            .all(|record| record.tags.contains(&"extraction:unsupported_mime".into())));
+        let evidence: Value = serde_json::from_str(&documents[0].content).unwrap();
+        let parent = restored
+            .iter()
+            .find(|record| record.id == evidence["parent_record_id"])
+            .unwrap();
+        assert_eq!(parent.kind, Kind::Message);
+        assert!(parent.tags.contains(&"attachments:retained".into()));
+        assert_eq!(
+            std::fs::read_dir(harness.directory.join("originals/blobs"))
+                .unwrap()
+                .count(),
+            1
+        );
+        let calls = harness.calls();
+        let first_downloads = calls
+            .iter()
+            .filter(|call| call[6] == "attachment" && call[7] == "a1")
+            .count();
+        assert_eq!(first_downloads, 1);
+        assert_eq!(
+            std::fs::read_dir(harness.directory.join("originals/pending"))
+                .unwrap()
+                .count(),
+            0
+        );
     }
 
     #[tokio::test]
