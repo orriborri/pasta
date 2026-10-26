@@ -1,0 +1,13 @@
+FROM rust:1.91-slim AS build
+WORKDIR /app
+COPY Cargo.toml Cargo.lock ./
+COPY crates ./crates
+RUN cargo build --release -p pasta-assistant
+
+FROM debian:bookworm-slim
+RUN useradd --uid 10001 --create-home assistant && mkdir /data && chown assistant /data
+COPY --from=build /app/target/release/pasta-assistant /usr/local/bin/pasta-assistant
+USER 10001:10001
+VOLUME /data
+ENTRYPOINT ["pasta-assistant"]
+CMD ["--help"]

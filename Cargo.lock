@@ -4169,6 +4169,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "pasta-assistant"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "clap",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "pasta-backend"
 version = "0.1.0"
 dependencies = [

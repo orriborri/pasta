@@ -143,3 +143,9 @@ The lossless guarantee starts at the records supplied by each fetcher.
 Atomic Parquet writes and wiki durability checks target local POSIX filesystems.
 Keep maintenance to one daemon/CLI writer at a time; scheduling single-flight
 protection does not coordinate separate CLI processes.
+
+## NAS assistant tools
+
+The optional Rust `pasta-assistant` CLI provides durable captures and a shared
+attention register for an external assistant runtime. See
+[setup, ownership, and limitations](docs/nas-assistant-tools.md).
