@@ -4,11 +4,12 @@ Status: proposed design; no runtime integration is implemented by this document.
 
 ## Why
 
-Pasta already ingests evidence, provides hybrid retrieval and structured MCP tools,
-and drives evidence-backed Markdown synthesis through the LLM Wiki Toolkit.
-Its current wiki writer applies filesystem patches to a PARA vault. The desired
-workspace uses the user's existing Johnny.Decimal index (JDex) for organization
-and outl for editing and synchronizing the notes Pasta writes.
+Pasta can ingest and retrieve evidence, then drive evidence-backed Markdown
+synthesis through the LLM Wiki Toolkit. For this workspace, the Synology NAS is
+the canonical home of original information. Pasta runs as a Docker service on
+the NAS, reads source files through a read-only bind mount, and produces
+JDex-classified knowledge without changing originals. outl is the separate
+editing and synchronization layer for refined notes.
 
 Use the existing JDex as the organizational authority. Do not introduce a
 second PARA hierarchy, allocate new numbers automatically, or turn outl into
@@ -18,12 +19,50 @@ another evidence database.
 
 | Layer | Authority |
 | --- | --- |
-| JDex registry | Approved area/category/ID definitions, labels, routing and external-location references |
-| Pasta raw store | Imported original evidence and its snapshot history |
+| Synology NAS source tree | Canonical original files and directory structure |
+| JDex registry | Approved area/category/ID definitions, labels, routing and source-to-ID references |
+| Pasta raw store | Rebuildable, versioned snapshots extracted from NAS sources; never the canonical original |
 | Pasta indexes | Rebuildable text, vector and relation views |
-| outl workspace | Authored and generated notes; outl operations, identities and projections |
+| outl workspace | Authored and generated knowledge notes; outl operations, identities and projections |
 | LLM runtime | Proposed synthesis, interpretation and classification |
 | Wiki orchestration state | Plans, validation, cursor, publication attempts and completion receipts |
+
+### NAS-first source of truth
+
+The Synology NAS owns the original documents and their canonical paths. Pasta's
+Parquet snapshots and indexes are derived data: they can be rebuilt from the
+NAS and must never be treated as the only surviving copy. JDex is the routing
+and discovery structure for this material; it does not replace the originals.
+
+Run Pasta in Docker on Synology. Mount the selected source roots read-only
+(for example, a NAS share mounted at `/sources`) and give Pasta a separate
+writable persistent volume for `/data`, configuration, and sync state. Do not
+mount the entire NAS by default. Scope access to the personal directories
+being indexed, keep secrets outside the source tree, and avoid logging document
+contents. A host-side Samba mount is an alternative only when the Docker host
+is another machine; when Pasta runs on Synology, a restricted bind mount avoids
+an unnecessary SMB hop.
+
+The current `Dockerfile.kb` already builds a containerized knowledge engine,
+and `VaultFetcher` reads Markdown from a local mounted directory. That fetcher
+is limited to Markdown in Pasta's configured vault folders; it does not yet
+index a general NAS file tree or extract Office/PDF documents. Add an explicit
+read-only file-tree source with a documented allowlist of formats, stable
+source references, content hashes, and change snapshots. Unsupported or
+encrypted files should be reported as skipped for review, not silently
+discarded or rewritten.
+
+A source record should retain its NAS-relative path, filename, media type,
+content hash, modified time, and extraction status. A JDex suggestion should
+link to that source record and original NAS path. Content changes create a new
+evidence snapshot; source disappearance creates a reviewable tombstone and
+does not delete prior evidence or generated knowledge. Rename detection must
+not merge same-content files automatically.
+
+OneDrive is not a co-equal writer for these originals. If it remains connected,
+treat it as a backup or explicitly configured import/export target. Avoid
+bidirectional edits that could make OneDrive and Synology disagree about which
+copy is canonical.
 
 outl synchronizes the knowledge workspace between paired devices. Pasta's
 Parquet, LanceDB, Tantivy and SQLite state are not part of that workspace and
@@ -221,6 +260,10 @@ not remove old evidence.
 - [ ] Implement the outl revision-page publisher with attempt journal, stable
       identity mapping, verified receipts and partial-write recovery.
 - [ ] Add JD landing pages and links without moving existing external files.
+- [ ] Add a read-only NAS file-tree fetcher with an explicit extraction
+      allowlist, stable source references, hashes and reviewable tombstones.
+- [ ] Run Pasta in Docker on Synology with narrowly scoped read-only source
+      mounts and separate persistent writable application data.
 - [ ] Add original-capture ingestion using stable outl IDs and generated-page
       exclusion before enabling the adapter in scheduled sync.
 - [ ] Update schemas, prompts, agent skills and operational documentation to
@@ -249,10 +292,13 @@ this integration. Reuse the current change feed and external runtime.
    value until recovery and verification succeed.
 7. Change or retire the JD entry between plan and publication; reject the stale
    plan without allocating a replacement ID.
-8. Verify an external OneDrive/Gmail reference remains a reference, and that no
+8. Verify NAS originals remain unchanged, Pasta rebuilds from the NAS source
+   tree, unsupported/encrypted inputs are visible as skipped, and deletion
+   tombstones do not erase prior evidence.
+9. Verify an optional OneDrive/Gmail reference remains a reference, and that no
    unrelated files or messages are moved, relabeled or removed.
-9. Run existing Python toolkit tests and relevant Rust tests; run workspace
-   CI before treating the integration as implemented.
+10. Run existing Python toolkit tests and relevant Rust tests; run workspace
+    CI before treating the integration as implemented.
 
 ## Rollout and rollback
 
