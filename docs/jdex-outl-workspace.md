@@ -150,6 +150,35 @@ ID or create an ID.
 Johnny.Decimal organizes knowledge; task state, entities and dates remain
 metadata. Journals can reference JD entries without getting a new ID per day.
 
+## Decision cockpit
+
+Use a review cockpit for the human/agent boundary: **the model proposes;
+the human decides; Pasta applies the approved work and verifies it**. The
+cockpit is the operational view over JDex filing and knowledge refinement,
+not another source of truth.
+
+Each review item includes the source path and stable source reference, a short
+evidence-backed summary, the candidate JD ID and destination, why the match is
+proposed, unresolved questions, and any filename conflict or dependency risk.
+Keep questions linked to source evidence and deduplicate them by stable source
+identity plus question key. If the source changes, mark affected proposals
+stale and ask Pasta to re-evaluate instead of silently retaining an old answer.
+
+The human can:
+
+- **Answer** — record a fact or correction with provenance.
+- **Later** — defer the item without losing its source or proposed route.
+- **Close** — dismiss the question with a reason and keep the original intact.
+- **Decide** — approve a JD destination and any proposed filing action.
+
+An approval creates an auditable plan containing exact source and destination
+paths, stable source IDs, registry revision, conflict checks, and the requested
+operation. Pasta applies only that approved plan, verifies the result, and
+records the before/after paths. Until a decision is made, the source remains in
+its current location or the designated JDex intake area. Never interpret
+silence, a high model confidence score, or a previous unrelated decision as
+approval for a move.
+
 ## outl representation
 
 Treat the entire outl workspace as an application-owned bundle. Preserve its
@@ -315,9 +344,11 @@ this integration. Reuse the current change feed and external runtime.
 8. Verify NAS originals remain unchanged, Pasta rebuilds from the NAS source
    tree, unsupported/encrypted inputs are visible as skipped, and deletion
    tombstones do not erase prior evidence.
-9. Verify an optional OneDrive/Gmail reference remains a reference, and that no
-   unrelated files or messages are moved, relabeled or removed.
-10. Run existing Python toolkit tests and relevant Rust tests; run workspace
+9. Verify the cockpit supports Answer, Later, Close, and Decide; deferred and
+   closed items remain auditable and never move source files.
+10. Verify an optional OneDrive/Gmail reference remains a reference, and that no
+    unrelated files or messages are moved, relabeled or removed.
+11. Run existing Python toolkit tests and relevant Rust tests; run workspace
     CI before treating the integration as implemented.
 
 ## Rollout and rollback
