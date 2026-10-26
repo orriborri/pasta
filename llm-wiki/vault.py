@@ -24,7 +24,7 @@ from typing import Any, Iterable
 STATE_DIR = ".llm-wiki"
 GENERATED_DIR = ".llm-wiki/generated"
 STATE_FILE = "state.json"
-DEFAULT_SECTIONS = ("1. Projects", "2. Areas", "3. Resources", "4. Archive")
+REGISTRY_FILE = "jdex-registry.json"
 CITATION_RE = re.compile(r"pasta:evidence:([^\s\])}>;,]+)")
 
 
@@ -231,7 +231,33 @@ def make_job_id(entity: str, evidence_ids: list[str]) -> str:
     return hashlib.sha256(material.encode("utf-8")).hexdigest()[:16]
 
 
+def load_registry(wiki: Path) -> dict[str, Any]:
+    path = checked_path(wiki, f"{STATE_DIR}/{REGISTRY_FILE}")
+    if not path.exists():
+        raise WikiError("JDex registry missing; initialize with init --registry PATH")
+    registry = read_json(path)
+    if not isinstance(registry, dict) or not isinstance(registry.get("entries"), list):
+        raise WikiError("JDex registry must contain an entries array")
+    seen = set()
+    for entry in registry["entries"]:
+        if not isinstance(entry, dict):
+            raise WikiError("invalid JDex entry")
+        jd_id = entry.get("jd_id")
+        if not isinstance(jd_id, str) or not re.fullmatch(r"[0-9]{2}\.[0-9]{2}", jd_id):
+            raise WikiError("JD IDs must be exact NN.NN strings")
+        if jd_id in seen or not isinstance(entry.get("label"), str) or not entry["label"].strip():
+            raise WikiError("duplicate JD ID or missing label")
+        seen.add(jd_id)
+    return registry
+
+
+def routing_entries(registry: dict[str, Any]) -> list[dict[str, str]]:
+    return [{"jd_id": e["jd_id"], "label": e["label"]} for e in registry["entries"]
+            if e.get("state") in ("approved", "management") and e.get("publication_enabled") is True]
+
+
 def build_plan(wiki: Path, changes: Any) -> dict[str, Any]:
+    registry = load_registry(wiki)
     records, next_cursor, has_more = normalize_change_page(changes)
     pages = index_pages(wiki)
     by_entity: dict[str, dict[str, Any]] = {}
@@ -272,6 +298,7 @@ def build_plan(wiki: Path, changes: Any) -> dict[str, Any]:
         jobs.append(
             {
                 "job_id": make_job_id(entity, evidence_ids),
+                "routing_entries": routing_entries(registry),
                 "entity": entity,
                 "evidence_record_ids": evidence_ids,
                 "existing_evidence_record_ids": existing_evidence,
@@ -283,6 +310,8 @@ def build_plan(wiki: Path, changes: Any) -> dict[str, Any]:
 
     plan = {
         "version": 1,
+        "registry_sha256": digest(registry),
+        "routing_entries": routing_entries(registry),
         "start_cursor": load_state(wiki).get("cursor"),
         "changes_sha256": digest(changes),
         "next_cursor": next_cursor,
@@ -300,6 +329,8 @@ def safe_page_path(page: str) -> PurePosixPath:
         raise WikiError(f"unsafe wiki page path: {page!r}")
     if len(p.parts) < 3 or p.parts[:2] != (".llm-wiki", "generated"):
         raise WikiError("machine-generated pages must live under .llm-wiki/generated/")
+    if len(p.parts) < 4 or not re.fullmatch(r"[0-9]{2}\.[0-9]{2}", p.parts[2]):
+        raise WikiError("generated pages require a JD ID folder: .llm-wiki/generated/NN.NN/title.md")
     return p
 
 
@@ -325,6 +356,13 @@ def validate_patch(wiki: Path, plan: dict[str, Any], patch: dict[str, Any]) -> l
         if not isinstance(page_value, str):
             raise WikiError("patch.page is required")
         page = safe_page_path(page_value)
+        registry = load_registry(wiki)
+        if plan.get("registry_sha256") != digest(registry):
+            raise WikiError("JDex registry changed; rebuild the plan")
+        jd_id = patch.get("jd_id")
+        allowed_ids = {e["jd_id"] for e in routing_entries(registry)}
+        if not isinstance(jd_id, str) or jd_id not in allowed_ids or page.parts[2] != jd_id:
+            raise WikiError("patch JD ID must be enabled and match its destination folder")
         content = patch.get("content")
         if not isinstance(content, str) or not content.strip():
             raise WikiError("patch.content must be non-empty Markdown")
@@ -334,6 +372,8 @@ def validate_patch(wiki: Path, plan: dict[str, Any], patch: dict[str, Any]) -> l
         meta = parse_frontmatter(content)
         if meta.get("llm_wiki") != "1":
             raise WikiError("frontmatter must include llm_wiki: 1 to prevent evidence feedback")
+        if meta.get("jd_id") != jd_id:
+            raise WikiError("frontmatter jd_id must match patch.jd_id")
         entities = meta.get("entities", [])
         if isinstance(entities, str):
             entities = [entities]
@@ -373,6 +413,8 @@ def validate_patch(wiki: Path, plan: dict[str, Any], patch: dict[str, Any]) -> l
 
 
 def assert_plan_current(wiki: Path, plan: dict[str, Any]) -> None:
+    if plan.get("registry_sha256") != digest(load_registry(wiki)):
+        raise WikiError("JDex registry changed; rebuild the plan")
     material = {key: value for key, value in plan.items() if key != "plan_id"}
     if plan.get("plan_id") != digest(material):
         raise WikiError("plan identity is missing or invalid; rebuild the plan")
@@ -483,9 +525,13 @@ def audit(wiki: Path) -> dict[str, Any]:
 def cmd_init(args: argparse.Namespace) -> int:
     wiki = args.wiki.resolve()
     wiki.mkdir(parents=True, exist_ok=True)
-    for name in DEFAULT_SECTIONS:
-        (wiki / name).mkdir(exist_ok=True)
     (wiki / GENERATED_DIR).mkdir(parents=True, exist_ok=True)
+    registry_path = checked_path(wiki, f"{STATE_DIR}/{REGISTRY_FILE}")
+    if registry_path.exists() and read_json(registry_path) != read_json(args.registry):
+        raise WikiError("registry already exists; explicit registry updates require replanning")
+    if not registry_path.exists():
+        write_json(read_json(args.registry), registry_path)
+    load_registry(wiki)
     if not state_path(wiki).exists():
         save_state(wiki, {"version": 1, "cursor": None})
     write_json({"wiki": str(wiki), "state": str(state_path(wiki)), "cursor": load_state(wiki).get("cursor")})
@@ -565,6 +611,7 @@ def parser() -> argparse.ArgumentParser:
 
     x = sub.add_parser("init", help="initialize a wiki root and cursor state")
     x.add_argument("--wiki", type=Path, required=True)
+    x.add_argument("--registry", type=Path, required=True, help="private JDex registry; routing requires approved state and publication_enabled")
     x.set_defaults(func=cmd_init)
 
     x = sub.add_parser("cursor", help="print the current opaque Pasta change cursor")

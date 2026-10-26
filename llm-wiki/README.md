@@ -42,7 +42,7 @@ LLM Wiki maintenance
 vault (wiki root)
 ```
 
-Pasta deliberately indexes only the `0. Inbox/Raw/` subtree of the operational inbox. Generated wiki pages live inside PARA and carry `llm_wiki: 1`. `VaultFetcher` excludes these pages from evidence ingestion regardless of their folder.
+Pasta deliberately indexes only the `0. Inbox/Raw/` subtree of the operational inbox. Generated wiki proposals are grouped by JDex ID and carry `llm_wiki: 1`. `VaultFetcher` excludes these pages from evidence ingestion regardless of their folder.
 
 The capture helper rejects obvious credential-like content by default and never silently claims persistence when a write fails.
 
@@ -70,20 +70,35 @@ Pasta get_changes / kb changes
     vault.py advance
 ```
 
-The PARA folders are human-curated. `vault.py init` creates them and `.llm-wiki/generated/`; all machine-generated pages belong under that hidden working folder and carry `llm_wiki: 1`. The planner reads generated pages there, and the vault fetcher excludes them.
+The wiki uses the existing private JDex registry. `init --registry PATH` imports
+it to `.llm-wiki/jdex-registry.json` without creating PARA folders. IDs must be
+exact `NN.NN` strings with unique IDs and nonempty labels. For publication an
+entry must explicitly set `state` to `approved` or `management` and
+`publication_enabled` to true. Audit exports do not automatically grant approval.
 
-Use existing canonical PARA pages when they cover the subject. Preserve their content and citations. Before converting an original note into a generated page, retain its source in `0. Inbox/Raw/`; marking a page excludes the entire page from future ingestion.
+Generated proposals live under `.llm-wiki/generated/NN.NN/title.md`. Each patch
+and its Markdown frontmatter must declare the same `jd_id`. The registry hash
+binds the plan through validation, application and cursor advancement; edits to
+the registry require replanning. Uncertain classifications must be skipped with
+a review reason. No nearest-match fallback or number allocation is permitted.
 
-- Keep `1. Projects/` for active, outcome-based commitments; use `2. Areas/` for ongoing responsibilities, `3. Resources/` for reusable reference, and `4. Archive/` for inactive material.
-- Sort by current actionability, not by whether a person or model created the material. When asked to improve PARA, verify generated claims against Pasta and synthesize useful updates into existing canonical notes with evidence citations.
-- Use links for relationships; do not duplicate a page across folders.
+Example private registry (fictional entry):
+```json
+{"entries":[{"jd_id":"41.13","label":"Training","state":"approved","publication_enabled":true}]}
+```
+
+Human JDex originals remain untouched. Previously generated PARA pages are not
+automatically moved; review and regenerate them with approved JD IDs. The
+hidden generated area is a review workspace grouped by JD ID, not a second
+canonical document tree. The physical NAS vault remains organized by area,
+category, and ID. Publishing into human notes is separate reviewed work.
 
 Deploy the updated fetcher before moving generated pages into indexed folders. Existing evidence records are retained; this exclusion prevents future ingestion and does not purge previously indexed prose.
 
 ## Quick start
 
 ```bash
-python llm-wiki/vault.py init --wiki ~/vault
+python llm-wiki/vault.py init --wiki ~/vault --registry /path/to/private/jdex-registry.json
 
 CURSOR="$(python llm-wiki/vault.py cursor --wiki ~/vault)"
 kb changes --json ${CURSOR:+--cursor "$CURSOR"} > /tmp/wiki-changes.json
@@ -149,7 +164,7 @@ The service is migrating to EKS. [source](pasta:evidence:linear-RP-123)
 
 ## Commands
 
-- `init` — create the wiki root, standard section directories, and cursor state.
+- `init` — create the wiki root, import JDex routing, and initialize cursor state.
 - `cursor` — print the opaque Pasta change cursor.
 - `plan` — turn a Pasta change page into entity-scoped LLM jobs.
 - `validate` — enforce path safety, entity ownership, and evidence boundaries.

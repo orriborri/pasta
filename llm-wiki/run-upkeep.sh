@@ -35,7 +35,7 @@ Repeat for at most $PAGES change pages:
 7. Only after every job on this page is applied: vault.py advance --wiki $WIKI --changes $RUN/page-N.json --allow-partial.
 8. Stop if the page had has_more=false.
 
-Do not write anything outside $WIKI and $RUN. Do not do PARA curation. End with one line: pages processed, patches applied, patches rejected, final cursor."
+Do not write anything outside $WIKI and $RUN. Do not edit canonical JDex originals; use enabled JD IDs for generated proposals. End with one line: pages processed, patches applied, patches rejected, final cursor."
 
 status=0
 claude -p "$PROMPT" \
