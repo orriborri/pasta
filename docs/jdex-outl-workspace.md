@@ -152,32 +152,62 @@ metadata. Journals can reference JD entries without getting a new ID per day.
 
 ## Decision cockpit
 
-Use a review cockpit for the human/agent boundary: **the model proposes;
-the human decides; Pasta applies the approved work and verifies it**. The
-cockpit is the operational view over JDex filing and knowledge refinement,
-not another source of truth.
+Use a local working view over the same NAS files the user reads. The cockpit
+is not a second database and makes no AI or external-service calls. It presents
+the review queue and writes Markdown records in the JDex system-management
+area. A separate model runtime (Codex, Claude Code, or another configured
+agent) processes approved work.
 
-Each review item includes the source path and stable source reference, a short
-evidence-backed summary, the candidate JD ID and destination, why the match is
-proposed, unresolved questions, and any filename conflict or dependency risk.
-Keep questions linked to source evidence and deduplicate them by stable source
-identity plus question key. If the source changes, mark affected proposals
-stale and ask Pasta to re-evaluate instead of silently retaining an old answer.
+The contract is: **the model writes; the human decides**. Pasta may identify
+open questions, propose routes, and suggest that an item is stale, answered,
+or duplicated. It cannot answer unresolved personal questions, change a
+decision's status, or treat a rewritten wiki page as proof of a commitment.
 
-The human can:
+Store one Markdown file per question, with a stable ID, source reference,
+affected JD IDs/pages, owner, status, opened date, optional follow-up date,
+and history. Generate the overview and cockpit counters from these records;
+never hand-edit generated summaries. New ingests add or update question
+records instead of appending to an unbounded open-questions page. Deduplicate
+by source identity and question key, while preserving history when a source
+changes or a question is reopened.
 
-- **Answer** — record a fact or correction with provenance.
-- **Later** — defer the item without losing its source or proposed route.
-- **Close** — dismiss the question with a reason and keep the original intact.
-- **Decide** — approve a JD destination and any proposed filing action.
+For each item, show the question, its evidence and origin, affected knowledge
+pages, proposed JDex route, age/due date, and any contradiction or conflict.
+The human can answer in their own words, then choose one outcome:
 
-An approval creates an auditable plan containing exact source and destination
-paths, stable source IDs, registry revision, conflict checks, and the requested
-operation. Pasta applies only that approved plan, verifies the result, and
-records the before/after paths. Until a decision is made, the source remains in
-its current location or the designated JDex intake area. Never interpret
-silence, a high model confidence score, or a previous unrelated decision as
-approval for a move.
+- **Work into the wiki** — queue a cited update for the configured agent.
+- **Keep open and follow up** — require a date so the item leaves the active
+  queue until it is due.
+- **Close** — record a reason; do not edit knowledge pages.
+- **Record as a decision** — create a separate decision-register entry with
+  assumptions, rejected alternatives, and conditions for revisiting it.
+
+Persist a human answer verbatim as a distinct evidence record before any wiki
+change. Keep its provenance clear: it records what the user said, not
+independent proof of the underlying claim. The agent then reads that record,
+updates affected JDex pages with citations, and marks the work complete only
+after read-back verification. If a source conflicts with the answer, show the
+conflict for review rather than silently overwriting either account.
+
+Decision entries are separate from generated wiki prose. The agent may draft
+their rationale and flag a possible revisit trigger, but only the human can
+mark a decision valid, superseded, or withdrawn. A later summary must cite the
+decision record and preserve its status; it must not reopen a settled decision
+unless a revisit condition is actually raised for human review.
+
+Batch triage may present suggested verdicts such as done, stale, or duplicate,
+each with a reason and supporting links. These remain suggestions until the
+human accepts or rejects them. Defer dates make old questions disappear from
+the active queue without erasing them. Counters should distinguish open, due,
+suggested for triage, decisions needing review, and work queued for the agent.
+
+A save is a recoverable multi-file operation: stage the answer/evidence,
+question or decision record, audit entry, and regenerated overview; validate
+the staged result; then publish it with a recovery journal and verify the
+read-back. On failure, leave a recoverable attempt and do not report success.
+Use version history for the small Markdown control records where available;
+do not put large original documents or generated indexes into Git merely to
+imitate a transaction. Never push or publish a decision automatically.
 
 ## outl representation
 
@@ -344,8 +374,9 @@ this integration. Reuse the current change feed and external runtime.
 8. Verify NAS originals remain unchanged, Pasta rebuilds from the NAS source
    tree, unsupported/encrypted inputs are visible as skipped, and deletion
    tombstones do not erase prior evidence.
-9. Verify the cockpit supports Answer, Later, Close, and Decide; deferred and
-   closed items remain auditable and never move source files.
+9. Verify answers are stored verbatim before wiki edits; only the human can
+   change decision status; defer dates, close reasons, and AI triage suggestions
+   remain auditable and do not silently move or rewrite original sources.
 10. Verify an optional OneDrive/Gmail reference remains a reference, and that no
     unrelated files or messages are moved, relabeled or removed.
 11. Run existing Python toolkit tests and relevant Rust tests; run workspace
