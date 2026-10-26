@@ -159,3 +159,8 @@ as `sync_assistant_captures`, without model-controlled paths. This dedicated pat
 does not write vault metadata. For other sync paths on a read-only NAS vault,
 set `[kb] write_vault_metadata = false`. Captures use source `vault` with original
 origin tags and stable `vault-assistant-<id>` references.
+
+Gmail now imports account-qualified full-message evidence snapshots rather than
+subject/date snippets. See [Gmail evidence import](docs/gmail-evidence-import.md)
+for account configuration, cursor migration and explicit attachment/history
+coverage limits. This is read-only ingestion; JDex label writes are a later slice.
