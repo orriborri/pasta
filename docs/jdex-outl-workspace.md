@@ -29,10 +29,14 @@ another evidence database.
 
 ### NAS-first source of truth
 
-The Synology NAS owns the original documents and their canonical paths. Pasta's
-Parquet snapshots and indexes are derived data: they can be rebuilt from the
-NAS and must never be treated as the only surviving copy. JDex is the routing
-and discovery structure for this material; it does not replace the originals.
+The Synology NAS owns the original documents and their canonical paths. The
+vault's physical directory tree follows the existing JDex hierarchy: area,
+category, then the existing string ID and label (for example,
+`40-49 Volunteering & safety/41 Sea rescue/41.13 Training`). Originals live in
+their assigned ID folders. Pasta's Parquet snapshots and indexes are derived
+data: they can be rebuilt from the NAS and must never be treated as the only
+surviving copy. JDex is both the physical filing structure and the routing
+index; it does not replace the originals.
 
 Run Pasta in Docker on Synology. Mount the selected source roots read-only
 (for example, a NAS share mounted at `/sources`) and give Pasta a separate
@@ -42,6 +46,17 @@ being indexed, keep secrets outside the source tree, and avoid logging document
 contents. A host-side Samba mount is an alternative only when the Docker host
 is another machine; when Pasta runs on Synology, a restricted bind mount avoids
 an unnecessary SMB hop.
+
+Pasta can help maintain this layout by producing a proposed filing plan
+with source path, destination JD ID, rationale, and confidence/evidence. Apply
+moves only for explicitly approved mappings or an enabled, tested routing
+policy. Keep unresolved files in the existing JDex intake/review location
+(`00.01`); do not create or infer IDs. A filing operation must verify the NAS
+destination and detect name conflicts before moving anything. It must preserve
+the original file bytes and record the old and new paths in an audit log.
+Generated knowledge pages use the same single primary JD ID and remain clearly
+marked as generated so the source fetcher cannot ingest them as original
+evidence.
 
 The current `Dockerfile.kb` already builds a containerized knowledge engine,
 and `VaultFetcher` reads Markdown from a local mounted directory. That fetcher
@@ -265,6 +280,8 @@ not remove old evidence.
 - [ ] Add JD landing pages and links without moving existing external files.
 - [ ] Add a read-only NAS file-tree fetcher with an explicit extraction
       allowlist, stable source references, hashes and reviewable tombstones.
+- [ ] Add a previewable JDex filing planner that moves files only under
+      approved mappings, preserves bytes, and records conflicts and history.
 - [ ] Run Pasta in Docker on Synology with narrowly scoped read-only source
       mounts and separate persistent writable application data.
 - [ ] Add original-capture ingestion using stable outl IDs and generated-page
