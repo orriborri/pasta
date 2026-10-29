@@ -11,3 +11,7 @@ mcp_servers:
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       # With gmail-evidence.compose.yaml, uncomment this for offline Gmail replay:
       # PASTA_GMAIL_EVIDENCE_DIR: /evidence/gmail
+# For reviewed Gmail label writes, see docs/jdex-gmail-label-actions.md.
+# Append --gmail-label-actions to pasta-attention args only after runtime isolation
+# is verified. Add an env mapping there for PASTA_GMAIL_EVIDENCE_DIR and the
+# operator-managed Gog auth environment. Approval is operator CLI-only.

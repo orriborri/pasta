@@ -2,7 +2,10 @@ mod mcp;
 use anyhow::{bail, Result};
 use chrono::{DateTime, Utc};
 use clap::{Parser, Subcommand};
-use pasta_assistant::{Registry, Store, TaskEdit};
+use pasta_assistant::{
+    gmail_labels::{Gog, LabelContext, LabelRequest},
+    Registry, Store, TaskEdit,
+};
 use std::{io::Read, path::PathBuf};
 
 #[derive(Parser)]
@@ -19,6 +22,9 @@ enum Command {
     Mcp {
         #[arg(long)]
         registry: Option<PathBuf>,
+        /// Opt in to Gmail label proposal/apply tools; approval stays CLI-only.
+        #[arg(long)]
+        gmail_label_actions: bool,
     },
     /// Capture UTF-8 evidence from stdin (does not create a task).
     Capture {
@@ -65,10 +71,106 @@ enum Command {
     Done {
         id: i64,
     },
+    Labels {
+        #[command(subcommand)]
+        command: LabelCommand,
+    },
     RegistryCheck {
         path: PathBuf,
     },
 }
+#[derive(Subcommand)]
+enum LabelCommand {
+    /// Preview a `LabelRequest` JSON from stdin; no Gmail writes.
+    Preview {
+        #[arg(long)]
+        registry: PathBuf,
+        #[arg(long)]
+        evidence_dir: PathBuf,
+    },
+    /// Operator approval of the exact reviewed digest (not exposed through MCP).
+    Approve {
+        id: String,
+        #[arg(long)]
+        digest: String,
+    },
+    /// Execute an already-approved exact delta and verify the result.
+    Apply {
+        id: String,
+        #[arg(long)]
+        registry: PathBuf,
+        #[arg(long)]
+        evidence_dir: PathBuf,
+    },
+    /// Read-only reconciliation; never retries a provider mutation.
+    Reconcile {
+        id: String,
+    },
+    Show {
+        id: String,
+    },
+    Reject {
+        id: String,
+    },
+    List {
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
+    },
+}
+async fn label_command(store: &mut Store, command: LabelCommand) -> Result<serde_json::Value> {
+    if let LabelCommand::List { limit } = &command {
+        return Ok(serde_json::to_value(store.gmail_label_actions(*limit)?)?);
+    }
+    let provider = Gog::default();
+    let action = match command {
+        LabelCommand::Preview {
+            registry,
+            evidence_dir,
+        } => {
+            let mut input = String::new();
+            std::io::stdin()
+                .take(1024 * 1024 + 1)
+                .read_to_string(&mut input)?;
+            if input.len() > 1024 * 1024 {
+                bail!("classification request exceeds 1 MiB");
+            }
+            let request: LabelRequest = serde_json::from_str(&input)?;
+            store
+                .preview_gmail_label(
+                    &LabelContext {
+                        registry,
+                        evidence_dir,
+                    },
+                    &request,
+                    &provider,
+                )
+                .await?
+        }
+        LabelCommand::Approve { id, digest } => store.approve_gmail_label(&id, &digest)?,
+        LabelCommand::Apply {
+            id,
+            registry,
+            evidence_dir,
+        } => {
+            store
+                .apply_gmail_label(
+                    &LabelContext {
+                        registry,
+                        evidence_dir,
+                    },
+                    &id,
+                    &provider,
+                )
+                .await?
+        }
+        LabelCommand::Reconcile { id } => store.reconcile_gmail_label(&id, &provider).await?,
+        LabelCommand::Show { id } => store.gmail_label_action(&id)?,
+        LabelCommand::Reject { id } => store.reject_gmail_label(&id)?,
+        LabelCommand::List { .. } => unreachable!(),
+    };
+    Ok(serde_json::to_value(action)?)
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -80,11 +182,16 @@ async fn main() -> Result<()> {
         );
         return Ok(());
     }
-    if let Command::Mcp { registry } = &cli.command {
-        return mcp::run(cli.database, registry.clone()).await;
+    if let Command::Mcp {
+        registry,
+        gmail_label_actions,
+    } = &cli.command
+    {
+        return mcp::run(cli.database, registry.clone(), *gmail_label_actions).await;
     }
     let mut store = Store::open(&cli.database)?;
     let result = match cli.command {
+        Command::Labels { command } => label_command(&mut store, command).await?,
         Command::Capture { source, source_id } => {
             let mut text = String::new();
             std::io::stdin()

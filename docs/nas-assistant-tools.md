@@ -143,3 +143,8 @@ production file only with services stopped. Search indexes remain disposable.
 [Hermes runtime trial](../deploy/synology/hermes/README.md) supplies a concrete
 container/MCP setup and the same acceptance scenarios for Hermes/OpenClaw.
 This does not complete live Telegram/NAS acceptance or choose a runtime.
+
+Reviewed Gmail classification/label actions now share this durable database.
+See [the approval workflow](jdex-gmail-label-actions.md). Gmail MCP tools are
+opt-in and cannot approve their own plans; operator CLI approval, source/registry
+preconditions, a narrow native-message delta and read-back receipts are required.

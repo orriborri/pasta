@@ -15,13 +15,30 @@ pub struct Registry {
 pub struct Entry {
     pub jd_id: String,
     pub label: String,
+    /// Explicit permission for Gmail `JDex` label additions/removals.
+    #[serde(default)]
+    pub gmail_label: bool,
+    #[serde(default)]
+    pub state: Option<String>,
+}
+impl Entry {
+    #[must_use]
+    pub fn gmail_enabled(&self) -> bool {
+        self.gmail_label && matches!(self.state.as_deref(), Some("approved" | "management"))
+    }
 }
 impl Registry {
     /// Load the existing exported `JDex`. Presence does not grant routing approval.
     /// # Errors
     /// Returns an error for unreadable JSON or invalid/duplicate IDs.
     pub fn load(path: &Path) -> Result<Self> {
-        let registry: Self = serde_json::from_slice(&std::fs::read(path)?)?;
+        Self::parse(&std::fs::read(path)?)
+    }
+    /// Validate registry bytes without a second file read.
+    /// # Errors
+    /// Rejects malformed JSON or invalid/duplicate IDs.
+    pub fn parse(bytes: &[u8]) -> Result<Self> {
+        let registry: Self = serde_json::from_slice(bytes)?;
         let mut seen = HashSet::new();
         for entry in &registry.entries {
             let b = entry.jd_id.as_bytes();
@@ -450,3 +467,5 @@ mod tests {
         std::fs::remove_file(path).unwrap();
     }
 }
+
+pub mod gmail_labels;
